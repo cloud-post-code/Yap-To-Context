@@ -27,3 +27,24 @@ export function authSecretMissingWhenRequired(): boolean {
     !getAuthSecret()
   );
 }
+
+/**
+ * In production / Railway, secrets must come from service variables (not only DB Settings).
+ * Fails fast at boot so misconfigured deploys surface in logs immediately.
+ */
+export function missingRequiredProductionEnvVars(): string[] {
+  if (!productionLikeDeployment()) return [];
+  const missing: string[] = [];
+  if (!process.env.OPENAI_API_KEY?.trim()) missing.push("OPENAI_API_KEY");
+  if (!process.env.INGEST_API_KEY?.trim()) missing.push("INGEST_API_KEY");
+  if (authSecretMissingWhenRequired()) missing.push("AUTH_SECRET");
+  return missing;
+}
+
+export function assertRequiredProductionEnvVars(): void {
+  const missing = missingRequiredProductionEnvVars();
+  if (missing.length === 0) return;
+  throw new Error(
+    `Set these in the host Variables (e.g. Railway → service → Variables): ${missing.join(", ")}.`,
+  );
+}
