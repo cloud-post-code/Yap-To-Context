@@ -109,6 +109,18 @@ function TreeList({
   );
 }
 
+/** Avoid doubling speech segments when the browser replays the same final result. */
+function mergeInterimTail(prev: string, tail: string): string {
+  const p = prev.trimEnd();
+  const t = tail.trim();
+  if (!t) return p;
+  if (!p) return t;
+  const pn = p.replace(/\s+/g, " ");
+  const tn = t.replace(/\s+/g, " ");
+  if (pn === tn || pn.endsWith(tn)) return p;
+  return `${p} ${t}`;
+}
+
 function flattenFoldersForPicker(
   nodes: FolderTreeNode[],
   prefix: string[] = [],
@@ -136,7 +148,6 @@ export default function HomeClient() {
   const [isRecording, setIsRecording] = useState(false);
   const [storedAudio, setStoredAudio] = useState<StoredAudioRow[] | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [dbExportBusy, setDbExportBusy] = useState(false);
   const [destinationFolderIds, setDestinationFolderIds] = useState<string[]>(
     [],
   );
@@ -148,6 +159,8 @@ export default function HomeClient() {
   const recognitionRef = useRef<WebSpeechRecognition | null>(null);
   const dictatingRef = useRef(false);
   const interimRef = useRef("");
+  /** Indices already committed from `results` (some engines emit duplicate finals). */
+  const processedFinalIndicesRef = useRef<Set<number>>(new Set());
 
   const refreshAuth = useCallback(async () => {
     const res = await fetch("/api/auth/status");
@@ -422,38 +435,6 @@ export default function HomeClient() {
     destinationsIncomplete;
   const clearDbDisabled =
     !signedIn || busy || auth === null || !auth.secretConfigured;
-  const exportDbDisabled =
-    !signedIn || dbExportBusy || auth === null || !auth.secretConfigured;
-
-  const exportDatabase = useCallback(async () => {
-    if (exportDbDisabled) return;
-    setDbExportBusy(true);
-    setStatus(null);
-    try {
-      const res = await authedFetch("/api/database/export");
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          typeof body.error === "string" ? body.error : res.statusText,
-        );
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      const cd = res.headers.get("Content-Disposition");
-      const m = cd?.match(/filename="([^"]+)"/);
-      a.download = m?.[1] ?? "yap-database-export.json";
-      a.href = url;
-      a.rel = "noopener";
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus("Database export downloaded.");
-    } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Export failed");
-    } finally {
-      setDbExportBusy(false);
-    }
-  }, [exportDbDisabled]);
 
   const clearDatabase = useCallback(async () => {
     if (clearDbDisabled) return;
@@ -501,9 +482,7 @@ export default function HomeClient() {
     interimRef.current = "";
     setInterimText("");
     if (tail) {
-      setNoteText((prev) =>
-        prev.trim() ? `${prev.trimEnd()} ${tail}` : tail,
-      );
+      setNoteText((prev) => mergeInterimTail(prev, tail));
     }
   }, []);
 
@@ -525,25 +504,30 @@ export default function HomeClient() {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = navigator.language || "en-US";
+    processedFinalIndicesRef.current.clear();
 
     rec.onresult = (event: WebSpeechRecognitionEvent) => {
       let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const piece = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          const add = piece.trim();
-          if (add) {
-            setNoteText((prev) =>
-              prev.trim() ? `${prev.trimEnd()} ${add}` : add,
-            );
-          }
-        } else {
-          interim += piece;
+      for (let i = 0; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) {
+          interim += event.results[i][0].transcript;
         }
       }
       const trimmed = interim.replace(/^\s+/, "");
       interimRef.current = trimmed;
       setInterimText(trimmed);
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) continue;
+        if (processedFinalIndicesRef.current.has(i)) continue;
+        processedFinalIndicesRef.current.add(i);
+        const add = event.results[i][0].transcript.trim();
+        if (add) {
+          setNoteText((prev) =>
+            prev.trim() ? `${prev.trimEnd()} ${add}` : add,
+          );
+        }
+      }
     };
 
     rec.onerror = (ev: WebSpeechRecognitionErrorEvent) => {
@@ -556,6 +540,7 @@ export default function HomeClient() {
       if (!dictatingRef.current) return;
       const current = recognitionRef.current;
       if (!current) return;
+      processedFinalIndicesRef.current.clear();
       try {
         current.start();
       } catch {
@@ -684,25 +669,6 @@ export default function HomeClient() {
         >
           Sign out
         </button>
-      ) : null}
-
-      {signedIn && auth?.secretConfigured ? (
-        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <h2 className="font-medium">Export database</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Download all tables as JSON (folders, documents, transcripts,
-            jobs). Audio files on disk are not included—only paths and
-            metadata.
-          </p>
-          <button
-            type="button"
-            disabled={exportDbDisabled}
-            className="mt-3 min-h-[44px] w-full rounded-lg border border-[var(--border)] px-3 text-sm font-medium disabled:opacity-40"
-            onClick={() => void exportDatabase()}
-          >
-            {dbExportBusy ? "Preparing…" : "Download JSON"}
-          </button>
-        </section>
       ) : null}
 
       {signedIn && auth?.openAiConfigured ? (
