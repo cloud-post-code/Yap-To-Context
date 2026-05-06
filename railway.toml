@@ -8,4 +8,5 @@
 healthcheckPath = "/api/settings"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
-preDeployCommand = ["npm", "run", "db:migrate"]
+# Railway allows at most one command entry — pass the full shell line as a single element.
+preDeployCommand = ["npm run db:migrate"]
