@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { authedFetch } from "@/lib/client-auth";
 
 type Doc = {
   id: string;
@@ -16,11 +17,17 @@ export default function DocumentPage() {
   const id = params.id as string;
   const [doc, setDoc] = useState<Doc | null | undefined>(undefined);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      const res = await fetch(`/api/documents/${id}`);
+      const res = await authedFetch(`/api/documents/${id}`);
       if (!res.ok) {
+        setError(
+          res.status === 401
+            ? "Sign in on Home to view this document."
+            : "Could not load document.",
+        );
         setDoc(null);
         return;
       }
@@ -43,7 +50,7 @@ export default function DocumentPage() {
     return (
       <div className="px-4 py-6">
         <Link href="/">← Home</Link>
-        <p className="mt-4">Not found.</p>
+        <p className="mt-4">{error ?? "Not found."}</p>
       </div>
     );
   }

@@ -3,7 +3,7 @@ import fs from "fs";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { NextRequest } from "next/server";
-import { assertIngestAuthorized } from "@/lib/ingest-auth";
+import { assertAuthorized } from "@/lib/auth";
 import { getAudioStoragePath } from "@/lib/env";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -14,7 +14,7 @@ import { processExtractions } from "@/lib/process-ingest";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const denied = await assertIngestAuthorized(req);
+  const denied = await assertAuthorized(req);
   if (denied) return denied;
 
   const form = await req.formData();

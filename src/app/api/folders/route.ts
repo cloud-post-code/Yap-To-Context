@@ -2,7 +2,7 @@ import { eq, isNull } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
-import { assertIngestAuthorized } from "@/lib/ingest-auth";
+import { assertAuthorized } from "@/lib/auth";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
 
@@ -14,7 +14,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const denied = await assertIngestAuthorized(req);
+  const denied = await assertAuthorized(req);
   if (denied) return denied;
 
   const json = await req.json().catch(() => null);

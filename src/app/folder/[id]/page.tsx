@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { authedFetch } from "@/lib/client-auth";
 
 type DocRow = {
   id: string;
@@ -14,17 +15,43 @@ export default function FolderPage() {
   const params = useParams();
   const id = params.id as string;
   const [docs, setDocs] = useState<DocRow[] | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      const res = await fetch(`/api/folders/${id}/documents`);
+      const res = await authedFetch(`/api/folders/${id}/documents`);
+      if (!res.ok) {
+        setError(res.status === 401 ? "Sign in on Home to view this folder." : "Could not load folder.");
+        setDocs([]);
+        return;
+      }
       const data = await res.json();
       setDocs(data.documents as DocRow[]);
     })();
   }, [id]);
 
-  const download = () => {
-    window.location.href = `/api/folders/${id}/download`;
+  const download = async () => {
+    setDownloading(true);
+    setError(null);
+    try {
+      const res = await authedFetch(`/api/folders/${id}/download`);
+      if (!res.ok) {
+        setError(res.status === 401 ? "Sign in on Home to download." : "Download failed.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `folder-${id.slice(0, 8)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -36,13 +63,20 @@ export default function FolderPage() {
         <h1 className="text-xl font-semibold">Folder</h1>
         <button
           type="button"
-          className="min-h-[44px] shrink-0 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-[var(--bg)]"
-          onClick={download}
+          disabled={downloading}
+          className="min-h-[44px] shrink-0 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-[var(--bg)] disabled:opacity-40"
+          onClick={() => void download()}
         >
-          Download ZIP
+          {downloading ? "Preparing…" : "Download ZIP"}
         </button>
       </div>
       <p className="mt-1 font-mono text-xs text-[var(--muted)]">{id}</p>
+
+      {error ? (
+        <p className="mt-4 rounded-lg border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-sm">
+          {error}
+        </p>
+      ) : null}
 
       <ul className="mt-6 space-y-2">
         {docs === null ? (

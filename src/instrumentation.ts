@@ -1,5 +1,5 @@
 import type * as Bootstrap from "@/db/bootstrap";
-import { assertProductionAuthSecretIfNeeded } from "@/lib/deploy-env";
+import { assertAuthSecretInProduction } from "@/lib/deploy-env";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -11,5 +11,5 @@ export async function register() {
   )) as typeof Bootstrap;
   await runMigrations();
   await seedRootFolders();
-  assertProductionAuthSecretIfNeeded();
+  assertAuthSecretInProduction();
 }

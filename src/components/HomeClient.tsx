@@ -8,14 +8,16 @@ import {
   extractionJsonSchemaFormatted,
 } from "@/lib/library-schema-copy";
 import type { FolderTreeNode } from "@/lib/tree-build";
+import {
+  authedFetch,
+  clearStoredSecret,
+  getStoredSecret,
+  setStoredSecret,
+} from "@/lib/client-auth";
 
 type AuthStatus = {
-  authenticated: boolean;
+  secretConfigured: boolean;
   openAiConfigured: boolean;
-  ingestConfigured: boolean;
-  cookieSessionsAvailable: boolean;
-  deploymentBlocked?: boolean;
-  envOverrides: { openai: boolean; ingest: boolean };
 };
 
 function TreeList({
@@ -76,7 +78,8 @@ function TreeList({
 
 export default function HomeClient() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [signInKey, setSignInKey] = useState("");
+  const [signedIn, setSignedIn] = useState(false);
+  const [signInPassword, setSignInPassword] = useState("");
   const [tree, setTree] = useState<FolderTreeNode[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -87,15 +90,23 @@ export default function HomeClient() {
   const chunksRef = useRef<Blob[]>([]);
 
   const refreshAuth = useCallback(async () => {
-    const res = await fetch("/api/auth/status", { credentials: "include" });
+    const res = await fetch("/api/auth/status");
     const data = (await res.json()) as AuthStatus;
     setAuth(data);
   }, []);
 
   const loadTree = useCallback(async () => {
-    const res = await fetch("/api/tree");
+    const res = await authedFetch("/api/tree");
+    if (!res.ok) {
+      setTree([]);
+      return;
+    }
     const data = await res.json();
     setTree(data.tree as FolderTreeNode[]);
+  }, []);
+
+  useEffect(() => {
+    setSignedIn(!!getStoredSecret());
   }, []);
 
   useEffect(() => {
@@ -103,16 +114,15 @@ export default function HomeClient() {
   }, [refreshAuth]);
 
   useEffect(() => {
-    void loadTree();
-  }, [loadTree]);
+    if (signedIn) void loadTree();
+  }, [loadTree, signedIn]);
 
   const ingestForm = async (form: FormData) => {
     setBusy(true);
     setStatus(null);
     try {
-      const res = await fetch("/api/ingest", {
+      const res = await authedFetch("/api/ingest", {
         method: "POST",
-        credentials: "include",
         body: form,
       });
       const body = await res.json().catch(() => ({}));
@@ -121,7 +131,6 @@ export default function HomeClient() {
         `Ingested: ${body.extractions ?? 0} note(s). Transcript saved.`,
       );
       await loadTree();
-      await refreshAuth();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Ingest failed");
     } finally {
@@ -195,17 +204,19 @@ export default function HomeClient() {
     setBusy(true);
     setStatus(null);
     try {
-      const res = await fetch("/api/auth/session", {
+      const candidate = signInPassword.trim();
+      const res = await fetch("/api/auth/check", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ingestKey: signInKey.trim() }),
+        body: JSON.stringify({ secret: candidate }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || res.statusText);
-      setSignInKey("");
+      setStoredSecret(candidate);
+      setSignedIn(true);
+      setSignInPassword("");
       setStatus("Signed in.");
-      await refreshAuth();
+      await loadTree();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Sign-in failed");
     } finally {
@@ -213,21 +224,15 @@ export default function HomeClient() {
     }
   };
 
-  const signOut = async () => {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    await refreshAuth();
+  const signOut = () => {
+    clearStoredSecret();
+    setSignedIn(false);
+    setTree(null);
     setStatus("Signed out.");
   };
 
-  const needsSetup =
-    auth && (!auth.openAiConfigured || !auth.ingestConfigured);
-  const cookieModeBlocked =
-    !!auth &&
-    auth.ingestConfigured &&
-    !auth.authenticated &&
-    auth.cookieSessionsAvailable;
-
-  const ingestDisabled = !!needsSetup || cookieModeBlocked;
+  const serverNotReady = !!auth && (!auth.secretConfigured || !auth.openAiConfigured);
+  const ingestDisabled = serverNotReady || !signedIn;
 
   const createFolder = useCallback(
     async (parentId: string | null) => {
@@ -245,9 +250,8 @@ export default function HomeClient() {
       setBusy(true);
       setStatus(null);
       try {
-        const res = await fetch("/api/folders", {
+        const res = await authedFetch("/api/folders", {
           method: "POST",
-          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ parentId, name }),
         });
@@ -273,65 +277,51 @@ export default function HomeClient() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Yap to Context</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          On Railway, set <code className="text-[var(--accent)]">OPENAI_API_KEY</code>,{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> (app password), and{" "}
-          <code className="text-[var(--accent)]">AUTH_SECRET</code> as service variables, or
-          add keys under Settings. If <code className="text-[var(--accent)]">INGEST_API_KEY</code>{" "}
-          is in Variables, <code className="text-[var(--accent)]">AUTH_SECRET</code> must be too.
-          Sign in with the app password (same as{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> when set on the host) to
-          capture notes and manage folders.
+          Set <code className="text-[var(--accent)]">OPENAI_API_KEY</code> and{" "}
+          <code className="text-[var(--accent)]">AUTH_SECRET</code> as Railway
+          service variables. Sign in below with{" "}
+          <code className="text-[var(--accent)]">AUTH_SECRET</code> to capture
+          notes and manage folders.
         </p>
       </header>
 
-      <nav className="flex flex-wrap gap-4 text-sm">
-        <Link href="/settings">Settings (API keys)</Link>
-        <Link href="/approvals">Pending folder approvals (legacy)</Link>
-      </nav>
-
-      {auth?.deploymentBlocked ? (
+      {auth && !auth.secretConfigured ? (
         <p className="rounded-xl border border-red-600/50 bg-red-950/40 px-4 py-3 text-sm">
-          Deployment misconfigured: add{" "}
-          <code className="text-[var(--accent)]">AUTH_SECRET</code> to Railway
-          variables alongside <code className="text-[var(--accent)]">INGEST_API_KEY</code>
-          , then redeploy. Sessions cannot start until both are set.
+          Server not ready: set{" "}
+          <code className="text-[var(--accent)]">AUTH_SECRET</code> in Railway
+          variables, then redeploy.
         </p>
       ) : null}
 
-      {needsSetup ? (
+      {auth && auth.secretConfigured && !auth.openAiConfigured ? (
         <p className="rounded-xl border border-amber-600/50 bg-amber-950/40 px-4 py-3 text-sm">
-          Finish setup: open{" "}
-          <Link href="/settings" className="text-[var(--accent)]">
-            Settings
-          </Link>{" "}
-          and save your OpenAI key, plus an app password if the host did not set{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code>. On Railway, if you set{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> in Variables, add{" "}
-          <code className="text-[var(--accent)]">AUTH_SECRET</code> there too.
+          Set <code className="text-[var(--accent)]">OPENAI_API_KEY</code> in
+          Railway to enable transcription and extraction.
         </p>
       ) : null}
 
-      {auth &&
-      !auth.deploymentBlocked &&
-      auth.ingestConfigured &&
-      !auth.authenticated &&
-      auth.cookieSessionsAvailable ? (
+      {auth && auth.secretConfigured && !signedIn ? (
         <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <h2 className="font-medium">Sign in</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Enter the app password (not your OpenAI key).
+            Enter the app password (<code className="text-[var(--accent)]">AUTH_SECRET</code>).
           </p>
           <input
             type="password"
             autoComplete="off"
             className="mt-3 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3"
             placeholder="App password"
-            value={signInKey}
-            onChange={(e) => setSignInKey(e.target.value)}
+            value={signInPassword}
+            onChange={(e) => setSignInPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && signInPassword.trim() && !busy) {
+                void signIn();
+              }
+            }}
           />
           <button
             type="button"
-            disabled={busy || !signInKey.trim()}
+            disabled={busy || !signInPassword.trim()}
             className="mt-3 w-full min-h-[44px] rounded-lg bg-[var(--accent)] font-medium text-[var(--bg)] disabled:opacity-40"
             onClick={() => void signIn()}
           >
@@ -340,11 +330,11 @@ export default function HomeClient() {
         </section>
       ) : null}
 
-      {auth?.authenticated ? (
+      {signedIn ? (
         <button
           type="button"
-          className="min-h-[44px] rounded-lg border border-[var(--border)] px-3 text-sm"
-          onClick={() => void signOut()}
+          className="min-h-[44px] self-start rounded-lg border border-[var(--border)] px-3 text-sm"
+          onClick={signOut}
         >
           Sign out
         </button>
@@ -440,7 +430,11 @@ export default function HomeClient() {
           placements.
         </p>
         <div className="mt-3">
-          {tree ? (
+          {!signedIn ? (
+            <p className="text-[var(--muted)]">Sign in to view the library.</p>
+          ) : tree === null ? (
+            <p className="text-[var(--muted)]">Loading…</p>
+          ) : (
             <TreeList
               nodes={tree}
               depth={0}
@@ -448,8 +442,6 @@ export default function HomeClient() {
               busy={busy}
               onAddChild={(id) => void createFolder(id)}
             />
-          ) : (
-            <p className="text-[var(--muted)]">Loading…</p>
           )}
         </div>
       </section>

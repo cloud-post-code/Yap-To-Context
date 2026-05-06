@@ -15,6 +15,19 @@ export function getDatabaseUrl(): string {
   );
 }
 
+/** OpenAI API key (Railway env var). Throws if missing. */
+export function getOpenAiApiKey(): string {
+  const v = process.env.OPENAI_API_KEY?.trim();
+  if (v) return v;
+  throw new Error(
+    "OPENAI_API_KEY is not set. Add it as a Railway service variable (or in .env locally).",
+  );
+}
+
+export function hasOpenAiApiKey(): boolean {
+  return !!process.env.OPENAI_API_KEY?.trim();
+}
+
 export function getAudioStoragePath(): string {
   const p = process.env.AUDIO_STORAGE_PATH?.trim();
   if (p) return p;

@@ -1,28 +1,11 @@
-import { NextRequest } from "next/server";
-import { authSecretMissingWhenRequired } from "@/lib/deploy-env";
-import {
-  cookieSessionsSupported,
-  verifySessionCookie,
-} from "@/lib/ingest-session";
-import {
-  hasIngestKey,
-  hasOpenAiKey,
-  ingestFromEnv,
-  openAiFromEnv,
-} from "@/lib/settings";
+import { hasAuthSecret } from "@/lib/auth";
+import { hasOpenAiApiKey } from "@/lib/env";
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   return Response.json({
-    authenticated: await verifySessionCookie(req),
-    openAiConfigured: await hasOpenAiKey(),
-    ingestConfigured: await hasIngestKey(),
-    cookieSessionsAvailable: await cookieSessionsSupported(),
-    deploymentBlocked: authSecretMissingWhenRequired(),
-    envOverrides: {
-      openai: !!openAiFromEnv(),
-      ingest: !!ingestFromEnv(),
-    },
+    secretConfigured: hasAuthSecret(),
+    openAiConfigured: hasOpenAiApiKey(),
   });
 }

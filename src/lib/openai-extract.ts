@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import { extractionJsonSchema } from "@/lib/extraction-json-schema";
-import { getEffectiveOpenAiKey } from "@/lib/settings";
+import { getOpenAiApiKey } from "@/lib/env";
 
 const extractionSchema = z.object({
   extractions: z.array(
@@ -22,7 +22,7 @@ export async function transcribeAudioFile(input: {
   buffer: Buffer;
   filename: string;
 }): Promise<string> {
-  const openai = new OpenAI({ apiKey: await getEffectiveOpenAiKey() });
+  const openai = new OpenAI({ apiKey: getOpenAiApiKey() });
   const file = await OpenAI.toFile(input.buffer, input.filename);
   const result = await openai.audio.transcriptions.create({
     file,
@@ -35,7 +35,7 @@ export async function extractStructuredNotes(input: {
   transcript: string;
   folderManifest: string;
 }): Promise<ExtractionPayload> {
-  const openai = new OpenAI({ apiKey: await getEffectiveOpenAiKey() });
+  const openai = new OpenAI({ apiKey: getOpenAiApiKey() });
   const manifest =
     input.folderManifest.trim().length > 0
       ? input.folderManifest

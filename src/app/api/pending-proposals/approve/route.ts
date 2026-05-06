@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { assertIngestAuthorized } from "@/lib/ingest-auth";
+import { assertAuthorized } from "@/lib/auth";
 import { approveFolderProposals } from "@/lib/folder-proposals";
 
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const denied = await assertIngestAuthorized(req);
+  const denied = await assertAuthorized(req);
   if (denied) return denied;
 
   const json = await req.json().catch(() => null);

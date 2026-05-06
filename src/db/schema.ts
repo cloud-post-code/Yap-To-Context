@@ -109,8 +109,3 @@ export const pendingDocumentPlacements = pgTable(
     }).notNull(),
   },
 );
-
-export const appSettings = pgTable("app_settings", {
-  key: text("key").primaryKey(),
-  value: text("value").notNull(),
-});
