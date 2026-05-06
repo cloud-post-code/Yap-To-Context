@@ -49,7 +49,7 @@ export default function SettingsClient() {
       const auth = await authRes.json();
       if (!auth.authenticated && auth.ingestConfigured) {
         const ik = window.prompt(
-          "Enter current ingest API key to authorize this change:",
+          "Enter current app password to authorize this change:",
         );
         if (!ik?.trim()) {
           setMsg("Save canceled.");
@@ -87,7 +87,7 @@ export default function SettingsClient() {
       const authRes = await fetch("/api/auth/status", { credentials: "include" });
       const auth = await authRes.json();
       if (!auth.authenticated && auth.ingestConfigured) {
-        const ik = window.prompt("Enter ingest API key to authorize:");
+        const ik = window.prompt("Enter app password to authorize:");
         if (!ik?.trim()) {
           setBusy(false);
           return;

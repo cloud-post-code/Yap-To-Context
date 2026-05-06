@@ -231,7 +231,7 @@ export default function HomeClient() {
   const createFolder = useCallback(
     async (parentId: string | null) => {
       if (ingestDisabled) {
-        setStatus("Sign in or paste Bearer ingest key to add folders.");
+        setStatus("Sign in with the app password to add folders.");
         return;
       }
       const label =
