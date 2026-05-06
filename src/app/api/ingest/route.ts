@@ -8,8 +8,8 @@ import { assertAuthorized } from "@/lib/auth";
 import { getAudioStoragePath } from "@/lib/env";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
-import { extractStructuredNotes, transcribeAudioFile } from "@/lib/openai-extract";
-import { processExtractions } from "@/lib/process-ingest";
+import { summarizeTranscript, transcribeAudioFile } from "@/lib/openai-extract";
+import { saveTranscriptSummaryDocument } from "@/lib/process-ingest";
 
 export const runtime = "nodejs";
 
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
       createdAt: new Date(),
     });
 
-    const payload = await extractStructuredNotes({
+    const payload = await summarizeTranscript({
       transcript: transcriptText,
     });
 
@@ -130,7 +130,12 @@ export async function POST(req: NextRequest) {
       })
       .where(eq(schema.ingestJobs.id, jobId));
 
-    await processExtractions({ transcriptId, payload, targetFolderIds });
+    await saveTranscriptSummaryDocument({
+      transcriptId,
+      transcriptText,
+      payload,
+      targetFolderIds,
+    });
 
     await db
       .update(schema.transcripts)
@@ -140,7 +145,7 @@ export async function POST(req: NextRequest) {
     return Response.json({
       transcriptId,
       transcript: transcriptText,
-      extractions: payload.extractions.length,
+      documentsCreated: 1,
     });
   } catch (e) {
     try {

@@ -1,21 +1,15 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import { extractionJsonSchema } from "@/lib/extraction-json-schema";
+import { transcriptSummaryJsonSchema } from "@/lib/extraction-json-schema";
 import { getOpenAiApiKey } from "@/lib/env";
 
-const extractionSchema = z.object({
-  extractions: z.array(
-    z.object({
-      title: z.string(),
-      body: z.string(),
-      reasoning_brief: z.string(),
-    }),
-  ),
+const summaryPayloadSchema = z.object({
+  summary: z.string(),
 });
 
-export type ExtractionPayload = z.infer<typeof extractionSchema>;
+export type TranscriptSummaryPayload = z.infer<typeof summaryPayloadSchema>;
 
-export { extractionJsonSchema } from "@/lib/extraction-json-schema";
+export { transcriptSummaryJsonSchema } from "@/lib/extraction-json-schema";
 
 export async function transcribeAudioFile(input: {
   buffer: Buffer;
@@ -30,9 +24,9 @@ export async function transcribeAudioFile(input: {
   return result.text?.trim() ?? "";
 }
 
-export async function extractStructuredNotes(input: {
+export async function summarizeTranscript(input: {
   transcript: string;
-}): Promise<ExtractionPayload> {
+}): Promise<TranscriptSummaryPayload> {
   const openai = new OpenAI({ apiKey: getOpenAiApiKey() });
 
   const completion = await openai.chat.completions.create({
@@ -41,22 +35,21 @@ export async function extractStructuredNotes(input: {
     messages: [
       {
         role: "system",
-        content: `You turn the transcript into one or more notes: titles, bodies, and brief rationales for how you split them. The user chooses library folders elsewhere — do not assign folders or paths.
+        content: `You summarize the user's transcript in clear, readable markdown (headings and bullets when helpful). The user will see the full transcript separately below your summary — do not repeat or paste the transcript here.
 
-Fidelity (non-negotiable): The transcript is the only source of substantive content in title and body. Do not invent or add information the speaker did not say (or type): no new facts, names, numbers, dates, commitments, causes, or details. Do not "helpfully" fill gaps, extrapolate unstated specifics, or treat guesses as facts. Allowed: summarize, split across notes, reorder for clarity, rephrase in your own words, and use markdown (headings, bullets) — still strictly grounded in what appears in the transcript. If the transcript is vague or incomplete, the notes must stay vague or incomplete on that point rather than fabricating precision.
+Fidelity (non-negotiable): Only summarize what appears in the transcript. Do not invent facts, names, numbers, dates, or details the speaker did not say. If the transcript is vague, the summary stays vague on that point.
 
-Splitting: Use multiple extractions when the transcript clearly covers separate topics, tasks, or decisions; use a single extraction for one coherent note.
-
-Rules:
-- Each extraction is one document (title + body). Body: short, readable markdown; bullets when helpful.
-- reasoning_brief: required; one short line (≤120 chars) on split/summary choices only, or "" if obvious. It must not introduce factual claims absent from the transcript.`,
+Produce a single comprehensive summary of everything in the transcript (not multiple separate documents or topics as distinct artifacts — one flowing summary is fine).`,
       },
       {
         role: "user",
         content: input.transcript,
       },
     ],
-    response_format: { type: "json_schema", json_schema: extractionJsonSchema },
+    response_format: {
+      type: "json_schema",
+      json_schema: transcriptSummaryJsonSchema,
+    },
   });
 
   const raw = completion.choices[0]?.message?.content;
@@ -69,5 +62,5 @@ Rules:
     throw new Error("Model returned invalid JSON");
   }
 
-  return extractionSchema.parse(parsed);
+  return summaryPayloadSchema.parse(parsed);
 }

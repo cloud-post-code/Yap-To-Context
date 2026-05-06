@@ -239,7 +239,7 @@ export default function HomeClient() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || res.statusText);
       setStatus(
-        `Ingested: ${body.extractions ?? 0} note(s). Transcript saved.`,
+        `Saved summary with full transcript below (${body.documentsCreated ?? 1} document).`,
       );
       await loadTree();
       await loadStoredAudio();
@@ -274,7 +274,7 @@ export default function HomeClient() {
     recordSaveRef.current = true;
     setIsRecording(false);
     setBusy(true);
-    setStatus("Transcribing and organizing…");
+    setStatus("Transcribing and summarizing…");
     rec.stop();
     mediaRef.current = null;
   };

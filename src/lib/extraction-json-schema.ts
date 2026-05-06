@@ -1,25 +1,13 @@
-/** OpenAI `response_format.json_schema` for transcript extractions (shared by API + UI). */
-export const extractionJsonSchema = {
-  name: "transcript_extractions",
+/** OpenAI `response_format.json_schema` for transcript summary (single summary string). */
+export const transcriptSummaryJsonSchema = {
+  name: "transcript_summary",
   schema: {
     type: "object",
     additionalProperties: false,
     properties: {
-      extractions: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            body: { type: "string" },
-            reasoning_brief: { type: "string" },
-          },
-          required: ["title", "body", "reasoning_brief"],
-        },
-      },
+      summary: { type: "string" },
     },
-    required: ["extractions"],
+    required: ["summary"],
   },
   strict: true,
 } as const;
