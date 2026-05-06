@@ -1,0 +1,7 @@
+# https://docs.railway.com/guides/config-as-code
+# Mount a volume on `/data` so SQLite (`/data/app.db`) and audio survive restarts.
+
+[deploy]
+healthcheckPath = "/api/settings"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
