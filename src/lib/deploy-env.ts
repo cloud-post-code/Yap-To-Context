@@ -15,3 +15,15 @@ export function getAuthSecret(): string | undefined {
   const v = process.env.AUTH_SECRET?.trim();
   return v || undefined;
 }
+
+/**
+ * On Railway/production, when the app password is set via INGEST_API_KEY (recommended),
+ * AUTH_SECRET must also be set so session cookies are signed with a dedicated secret.
+ */
+export function authSecretMissingWhenRequired(): boolean {
+  return (
+    productionLikeDeployment() &&
+    !!process.env.INGEST_API_KEY?.trim() &&
+    !getAuthSecret()
+  );
+}

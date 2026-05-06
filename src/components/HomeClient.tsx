@@ -14,6 +14,7 @@ type AuthStatus = {
   openAiConfigured: boolean;
   ingestConfigured: boolean;
   cookieSessionsAvailable: boolean;
+  deploymentBlocked?: boolean;
   envOverrides: { openai: boolean; ingest: boolean };
 };
 
@@ -272,11 +273,13 @@ export default function HomeClient() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Yap to Context</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Add your OpenAI key under Settings if it is not already set on the
-          server. Sign in with the app password (same secret as{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> on the
-          host, or the ingest key saved in Settings) to capture notes and manage
-          folders.
+          On Railway, set <code className="text-[var(--accent)]">OPENAI_API_KEY</code>
+          , <code className="text-[var(--accent)]">INGEST_API_KEY</code> (short app
+          password), and <code className="text-[var(--accent)]">AUTH_SECRET</code>{" "}
+          as service variables. Otherwise add keys under Settings. Sign in with the
+          app password (same value as{" "}
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code> when set on
+          the host) to capture notes and manage folders.
         </p>
       </header>
 
@@ -284,6 +287,15 @@ export default function HomeClient() {
         <Link href="/settings">Settings (API keys)</Link>
         <Link href="/approvals">Pending folder approvals (legacy)</Link>
       </nav>
+
+      {auth?.deploymentBlocked ? (
+        <p className="rounded-xl border border-red-600/50 bg-red-950/40 px-4 py-3 text-sm">
+          Deployment misconfigured: add{" "}
+          <code className="text-[var(--accent)]">AUTH_SECRET</code> to Railway
+          variables alongside <code className="text-[var(--accent)]">INGEST_API_KEY</code>
+          , then redeploy. Sessions cannot start until both are set.
+        </p>
+      ) : null}
 
       {needsSetup ? (
         <p className="rounded-xl border border-amber-600/50 bg-amber-950/40 px-4 py-3 text-sm">
@@ -297,6 +309,7 @@ export default function HomeClient() {
       ) : null}
 
       {auth &&
+      !auth.deploymentBlocked &&
       auth.ingestConfigured &&
       !auth.authenticated &&
       auth.cookieSessionsAvailable ? (

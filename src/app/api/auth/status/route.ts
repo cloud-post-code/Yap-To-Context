@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { authSecretMissingWhenRequired } from "@/lib/deploy-env";
 import {
   cookieSessionsSupported,
   verifySessionCookie,
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
     openAiConfigured: await hasOpenAiKey(),
     ingestConfigured: await hasIngestKey(),
     cookieSessionsAvailable: await cookieSessionsSupported(),
+    deploymentBlocked: authSecretMissingWhenRequired(),
     envOverrides: {
       openai: !!openAiFromEnv(),
       ingest: !!ingestFromEnv(),

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { authSecretMissingWhenRequired } from "@/lib/deploy-env";
 import {
   buildSessionSetCookie,
   createSessionCookieValue,
@@ -44,6 +45,16 @@ export async function POST(req: NextRequest) {
   const given = parsed.data.ingestKey.trim();
   if (!timingSafeStringEq(given, expected)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (authSecretMissingWhenRequired()) {
+    return Response.json(
+      {
+        error:
+          "Set AUTH_SECRET in Railway variables (required alongside INGEST_API_KEY in production).",
+      },
+      { status: 503 },
+    );
   }
 
   const val = await createSessionCookieValue();
