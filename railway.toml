@@ -1,12 +1,9 @@
 # https://docs.railway.com/guides/config-as-code
-# Add a PostgreSQL service and link it to this service so DATABASE_URL is set.
-# Migrations run before the new deployment goes live; the app also runs migrations
-# on boot via instrumentation (idempotent).
+# Add a PostgreSQL service and link it so DATABASE_URL is injected on this service.
+# Migrations run on boot via instrumentation.ts (idempotent). Local CLI: npm run db:migrate
 # Mount a volume on `/data` if you use file-based audio storage (AUDIO_STORAGE_PATH defaults to /data/audio in production).
 
 [deploy]
 healthcheckPath = "/api/settings"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
-# Railway allows at most one command entry — pass the full shell line as a single element.
-preDeployCommand = ["npm run db:migrate"]
