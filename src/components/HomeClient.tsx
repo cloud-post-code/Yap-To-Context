@@ -1,12 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  EXTRACTION_PAYLOAD_OVERVIEW,
-  ROOT_LIBRARY_GUIDES,
-  extractionJsonSchemaFormatted,
-} from "@/lib/library-schema-copy";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FolderTreeNode } from "@/lib/tree-build";
 import {
   authedFetch,
@@ -15,9 +10,47 @@ import {
   setStoredSecret,
 } from "@/lib/client-auth";
 
+/** Narrow Web Speech API types (not always in TS `lib.dom`). */
+type WebSpeechAlt = { transcript: string };
+type WebSpeechResult = { 0: WebSpeechAlt; isFinal: boolean };
+type WebSpeechRecognitionEvent = {
+  resultIndex: number;
+  results: { length: number; [i: number]: WebSpeechResult };
+};
+type WebSpeechRecognitionErrorEvent = { error: string };
+type WebSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((ev: WebSpeechRecognitionEvent) => void) | null;
+  onerror: ((ev: WebSpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+};
+
+function getSpeechRecognitionCtor():
+  | (new () => WebSpeechRecognition)
+  | undefined {
+  if (typeof window === "undefined") return undefined;
+  const w = window as typeof window & {
+    SpeechRecognition?: new () => WebSpeechRecognition;
+    webkitSpeechRecognition?: new () => WebSpeechRecognition;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition;
+}
+
 type AuthStatus = {
   secretConfigured: boolean;
   openAiConfigured: boolean;
+};
+
+type StoredAudioRow = {
+  id: string;
+  filename: string;
+  createdAt: string;
+  status: string;
 };
 
 function TreeList({
@@ -76,6 +109,19 @@ function TreeList({
   );
 }
 
+function flattenFoldersForPicker(
+  nodes: FolderTreeNode[],
+  prefix: string[] = [],
+): { id: string; label: string }[] {
+  const rows: { id: string; label: string }[] = [];
+  for (const n of nodes) {
+    const parts = [...prefix, n.name];
+    rows.push({ id: n.id, label: parts.join(" / ") });
+    rows.push(...flattenFoldersForPicker(n.children, parts));
+  }
+  return rows;
+}
+
 export default function HomeClient() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -84,10 +130,24 @@ export default function HomeClient() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [interimText, setInterimText] = useState("");
+  const [isDictating, setIsDictating] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [storedAudio, setStoredAudio] = useState<StoredAudioRow[] | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [dbExportBusy, setDbExportBusy] = useState(false);
+  const [destinationFolderIds, setDestinationFolderIds] = useState<string[]>(
+    [],
+  );
   const fileRef = useRef<HTMLInputElement>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  /** When false, the next `MediaRecorder` `onstop` discards audio (user canceled). */
+  const recordSaveRef = useRef(true);
+  const recognitionRef = useRef<WebSpeechRecognition | null>(null);
+  const dictatingRef = useRef(false);
+  const interimRef = useRef("");
 
   const refreshAuth = useCallback(async () => {
     const res = await fetch("/api/auth/status");
@@ -113,14 +173,65 @@ export default function HomeClient() {
     void refreshAuth();
   }, [refreshAuth]);
 
+  const loadStoredAudio = useCallback(async () => {
+    if (!getStoredSecret()) {
+      setStoredAudio(null);
+      return;
+    }
+    const res = await authedFetch("/api/transcripts");
+    if (!res.ok) {
+      setStoredAudio([]);
+      return;
+    }
+    const data = (await res.json()) as { items: StoredAudioRow[] };
+    setStoredAudio(data.items);
+  }, []);
+
   useEffect(() => {
     if (signedIn) void loadTree();
   }, [loadTree, signedIn]);
+
+  useEffect(() => {
+    if (signedIn) void loadStoredAudio();
+    else setStoredAudio(null);
+  }, [loadStoredAudio, signedIn]);
+
+  useEffect(() => {
+    setSpeechSupported(!!getSpeechRecognitionCtor());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      dictatingRef.current = false;
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        /* ignore */
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tree === null) return;
+    const valid = new Set(flattenFoldersForPicker(tree).map((r) => r.id));
+    setDestinationFolderIds((prev) => prev.filter((id) => valid.has(id)));
+  }, [tree]);
+
+  const folderPickerRows = useMemo(() => {
+    if (!tree || tree.length === 0) return [];
+    return flattenFoldersForPicker(tree).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [tree]);
 
   const ingestForm = async (form: FormData) => {
     setBusy(true);
     setStatus(null);
     try {
+      for (const id of destinationFolderIds) {
+        form.append("folderIds", id);
+      }
       const res = await authedFetch("/api/ingest", {
         method: "POST",
         body: form,
@@ -131,6 +242,7 @@ export default function HomeClient() {
         `Ingested: ${body.extractions ?? 0} note(s). Transcript saved.`,
       );
       await loadTree();
+      await loadStoredAudio();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Ingest failed");
     } finally {
@@ -143,6 +255,8 @@ export default function HomeClient() {
     fd.set("text", noteText);
     await ingestForm(fd);
     setNoteText("");
+    setInterimText("");
+    interimRef.current = "";
   };
 
   const onPickFile = async () => {
@@ -157,9 +271,20 @@ export default function HomeClient() {
   const stopRecording = () => {
     const rec = mediaRef.current;
     if (!rec) return;
+    recordSaveRef.current = true;
     setIsRecording(false);
     setBusy(true);
     setStatus("Transcribing and organizing…");
+    rec.stop();
+    mediaRef.current = null;
+  };
+
+  const cancelRecording = () => {
+    const rec = mediaRef.current;
+    if (!rec) return;
+    recordSaveRef.current = false;
+    setIsRecording(false);
+    setStatus("Recording canceled. Nothing was saved.");
     rec.stop();
     mediaRef.current = null;
   };
@@ -170,11 +295,18 @@ export default function HomeClient() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const rec = new MediaRecorder(stream);
       chunksRef.current = [];
+      recordSaveRef.current = true;
       rec.ondataavailable = (ev) => {
         if (ev.data.size) chunksRef.current.push(ev.data);
       };
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        const shouldSave = recordSaveRef.current;
+        recordSaveRef.current = true;
+        if (!shouldSave) {
+          chunksRef.current = [];
+          return;
+        }
         const blob = new Blob(chunksRef.current, { type: rec.mimeType });
         const fd = new FormData();
         fd.set(
@@ -187,17 +319,12 @@ export default function HomeClient() {
       rec.start();
       mediaRef.current = rec;
       setIsRecording(true);
-      setStatus("Recording… tap again to stop and save.");
+      setStatus("Recording… stop to save, or cancel to discard.");
     } catch (e) {
       setStatus(
         e instanceof Error ? e.message : "Could not access microphone",
       );
     }
-  };
-
-  const toggleRecording = () => {
-    if (isRecording) stopRecording();
-    else void startRecording();
   };
 
   const signIn = async () => {
@@ -217,6 +344,7 @@ export default function HomeClient() {
       setSignInPassword("");
       setStatus("Signed in.");
       await loadTree();
+      await loadStoredAudio();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Sign-in failed");
     } finally {
@@ -225,14 +353,232 @@ export default function HomeClient() {
   };
 
   const signOut = () => {
+    dictatingRef.current = false;
+    setIsDictating(false);
+    try {
+      recognitionRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    recognitionRef.current = null;
+    interimRef.current = "";
+    setInterimText("");
+    recordSaveRef.current = false;
+    const recOut = mediaRef.current;
+    if (recOut) {
+      try {
+        recOut.stop();
+      } catch {
+        /* ignore */
+      }
+      mediaRef.current = null;
+    }
+    chunksRef.current = [];
+    setIsRecording(false);
     clearStoredSecret();
     setSignedIn(false);
     setTree(null);
+    setStoredAudio(null);
     setStatus("Signed out.");
   };
 
+  const deleteStoredAudio = async (row: StoredAudioRow) => {
+    if (
+      !window.confirm(
+        `Delete “${row.filename}” from disk? Notes from this ingest stay in the library; only the audio file is removed.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(row.id);
+    setStatus(null);
+    try {
+      const res = await authedFetch(`/api/transcripts/${row.id}/audio`, {
+        method: "DELETE",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || res.statusText);
+      setStatus("Audio file deleted.");
+      await loadStoredAudio();
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const serverNotReady = !!auth && (!auth.secretConfigured || !auth.openAiConfigured);
-  const ingestDisabled = serverNotReady || !signedIn;
+  const treeLoadingBlocksIngest =
+    signedIn && !!auth?.openAiConfigured && tree === null;
+  const destinationsIncomplete =
+    signedIn &&
+    !!auth?.openAiConfigured &&
+    tree !== null &&
+    (tree.length === 0 || destinationFolderIds.length === 0);
+  const ingestDisabled =
+    serverNotReady ||
+    !signedIn ||
+    treeLoadingBlocksIngest ||
+    destinationsIncomplete;
+  const clearDbDisabled =
+    !signedIn || busy || auth === null || !auth.secretConfigured;
+  const exportDbDisabled =
+    !signedIn || dbExportBusy || auth === null || !auth.secretConfigured;
+
+  const exportDatabase = useCallback(async () => {
+    if (exportDbDisabled) return;
+    setDbExportBusy(true);
+    setStatus(null);
+    try {
+      const res = await authedFetch("/api/database/export");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.error === "string" ? body.error : res.statusText,
+        );
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const cd = res.headers.get("Content-Disposition");
+      const m = cd?.match(/filename="([^"]+)"/);
+      a.download = m?.[1] ?? "yap-database-export.json";
+      a.href = url;
+      a.rel = "noopener";
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus("Database export downloaded.");
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setDbExportBusy(false);
+    }
+  }, [exportDbDisabled]);
+
+  const clearDatabase = useCallback(async () => {
+    if (clearDbDisabled) return;
+    if (
+      !window.confirm(
+        "Permanently delete all notes, transcripts, ingest history, custom folders, and stored audio files? Blog, Company, Ideas, and Inbox will be recreated empty. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const res = await authedFetch("/api/database/clear", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || res.statusText);
+      setNoteText("");
+      setInterimText("");
+      interimRef.current = "";
+      await loadTree();
+      await loadStoredAudio();
+      setStatus(
+        "Database cleared. Root folders (Blog, Company, Ideas, Inbox) were recreated.",
+      );
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Could not clear database");
+    } finally {
+      setBusy(false);
+    }
+  }, [clearDbDisabled, loadStoredAudio, loadTree]);
+
+  const stopDictation = useCallback(() => {
+    dictatingRef.current = false;
+    setIsDictating(false);
+    const rec = recognitionRef.current;
+    recognitionRef.current = null;
+    if (rec) {
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    const tail = interimRef.current.trim();
+    interimRef.current = "";
+    setInterimText("");
+    if (tail) {
+      setNoteText((prev) =>
+        prev.trim() ? `${prev.trimEnd()} ${tail}` : tail,
+      );
+    }
+  }, []);
+
+  const startDictation = useCallback(() => {
+    if (ingestDisabled || busy || isDictating) return;
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      setStatus("Speech recognition is not available in this browser.");
+      return;
+    }
+    try {
+      recognitionRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    recognitionRef.current = null;
+
+    const rec = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || "en-US";
+
+    rec.onresult = (event: WebSpeechRecognitionEvent) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const piece = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          const add = piece.trim();
+          if (add) {
+            setNoteText((prev) =>
+              prev.trim() ? `${prev.trimEnd()} ${add}` : add,
+            );
+          }
+        } else {
+          interim += piece;
+        }
+      }
+      const trimmed = interim.replace(/^\s+/, "");
+      interimRef.current = trimmed;
+      setInterimText(trimmed);
+    };
+
+    rec.onerror = (ev: WebSpeechRecognitionErrorEvent) => {
+      if (ev.error === "aborted") return;
+      if (ev.error === "no-speech") return;
+      setStatus(`Speech: ${ev.error}`);
+    };
+
+    rec.onend = () => {
+      if (!dictatingRef.current) return;
+      const current = recognitionRef.current;
+      if (!current) return;
+      try {
+        current.start();
+      } catch {
+        /* already running or invalid state */
+      }
+    };
+
+    recognitionRef.current = rec;
+    dictatingRef.current = true;
+    setIsDictating(true);
+    interimRef.current = "";
+    setInterimText("");
+    try {
+      rec.start();
+    } catch (e) {
+      dictatingRef.current = false;
+      setIsDictating(false);
+      recognitionRef.current = null;
+      setStatus(
+        e instanceof Error ? e.message : "Could not start speech recognition",
+      );
+    }
+  }, [busy, ingestDisabled, isDictating]);
 
   const createFolder = useCallback(
     async (parentId: string | null) => {
@@ -340,43 +686,214 @@ export default function HomeClient() {
         </button>
       ) : null}
 
+      {signedIn && auth?.secretConfigured ? (
+        <>
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <h2 className="font-medium">Export database</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Download all tables as JSON (folders, documents, transcripts,
+              jobs). Audio files on disk are not included—only paths and
+              metadata.
+            </p>
+            <button
+              type="button"
+              disabled={exportDbDisabled}
+              className="mt-3 min-h-[44px] w-full rounded-lg border border-[var(--border)] px-3 text-sm font-medium disabled:opacity-40"
+              onClick={() => void exportDatabase()}
+            >
+              {dbExportBusy ? "Preparing…" : "Download JSON"}
+            </button>
+          </section>
+
+          <section className="rounded-xl border border-red-500/35 bg-[var(--surface)] p-4">
+            <h2 className="font-medium text-red-400/95">Danger zone</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Remove all library data and audio from the database and disk.
+              Default top-level folders are seeded again afterward.
+            </p>
+            <button
+              type="button"
+              disabled={clearDbDisabled}
+              className="mt-3 min-h-[44px] w-full rounded-lg border border-red-500/60 px-3 text-sm font-medium text-red-400 disabled:opacity-40"
+              onClick={() => void clearDatabase()}
+            >
+              {busy ? "Working…" : "Clear database"}
+            </button>
+          </section>
+        </>
+      ) : null}
+
+      {signedIn && auth?.openAiConfigured ? (
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <h2 className="font-medium">Save notes to</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Pick one or more folders. Notes from each ingest are saved into every
+            folder you check (the model only writes titles and bodies—you choose
+            where they go).
+          </p>
+          {tree === null ? (
+            <p className="mt-3 text-sm text-[var(--muted)]">Loading folders…</p>
+          ) : tree.length === 0 ? (
+            <p className="mt-3 text-sm text-amber-300">
+              No folders yet. Add libraries in the Library section below first.
+            </p>
+          ) : (
+            <ul className="mt-3 max-h-52 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2">
+              {folderPickerRows.map((row) => (
+                <li key={row.id}>
+                  <label className="flex min-h-[44px] cursor-pointer items-start gap-3 rounded-md px-2 py-1.5 hover:bg-[var(--surface)]">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 shrink-0 accent-[var(--accent)]"
+                      checked={destinationFolderIds.includes(row.id)}
+                      onChange={() => {
+                        setDestinationFolderIds((prev) =>
+                          prev.includes(row.id)
+                            ? prev.filter((x) => x !== row.id)
+                            : [...prev, row.id],
+                        );
+                      }}
+                    />
+                    <span className="text-sm leading-snug">{row.label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h2 className="font-medium">Add from text</h2>
-        <textarea
-          className="mt-2 min-h-[120px] w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)]"
-          placeholder="Paste rough notes…"
-          value={noteText}
-          onChange={(e) => setNoteText(e.target.value)}
-        />
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {speechSupported === false
+            ? "Your browser does not support live captions. Paste or type notes below."
+            : "Words appear here as you speak. Stop when finished, then ingest."}
+        </p>
+        {speechSupported === false ? (
+          <textarea
+            className="mt-2 min-h-[120px] w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)]"
+            placeholder="Paste rough notes…"
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+          />
+        ) : (
+          <>
+            <div
+              className="mt-2 min-h-[120px] w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)] whitespace-pre-wrap"
+              aria-live="polite"
+              aria-relevant="additions text"
+            >
+              {noteText ? (
+                <span>{noteText}</span>
+              ) : !interimText && !isDictating ? (
+                <span className="text-[var(--muted)]">
+                  Tap “Start listening”, allow the microphone, then speak.
+                </span>
+              ) : null}
+              {interimText ? (
+                <span className="text-[var(--muted)]">
+                  {noteText ? " " : ""}
+                  {interimText}
+                </span>
+              ) : null}
+              {isDictating && !noteText && !interimText ? (
+                <span className="text-[var(--muted)]"> Listening…</span>
+              ) : null}
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              {!isDictating ? (
+                <button
+                  type="button"
+                  disabled={ingestDisabled || busy}
+                  className="min-h-[44px] flex-1 rounded-lg bg-[var(--accent)] font-medium text-[var(--bg)] disabled:opacity-40"
+                  onClick={() => void startDictation()}
+                >
+                  Start listening
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="min-h-[44px] flex-1 rounded-lg border-2 border-red-500/80 bg-transparent font-medium text-red-400 disabled:opacity-40"
+                  onClick={stopDictation}
+                >
+                  Stop listening
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy || (!noteText.trim() && !interimText.trim())}
+                className="min-h-[44px] flex-1 rounded-lg border border-[var(--border)] px-3 font-medium disabled:opacity-40"
+                onClick={() => {
+                  setNoteText("");
+                  setInterimText("");
+                  interimRef.current = "";
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          </>
+        )}
         <button
           type="button"
-          disabled={busy || !noteText.trim() || ingestDisabled}
+          disabled={
+            busy ||
+            !noteText.trim() ||
+            ingestDisabled ||
+            (speechSupported !== false && !!interimText.trim())
+          }
           className="mt-3 w-full min-h-[44px] rounded-lg border border-[var(--border)] px-3 font-medium disabled:opacity-40"
           onClick={() => void submitText()}
         >
           Ingest text
         </button>
+        {speechSupported !== false ? (
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Stop listening before ingest so the last phrase is finalized. In
+            Chrome or Edge, captions run on your device.
+          </p>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h2 className="font-medium">Voice</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          One tap to record, tap again to finish. The model transcribes, splits
-          into notes, and places them under the folders that fit best.
+          Start recording, then stop to save or cancel to discard without
+          ingesting. Saved clips are transcribed and split into notes using the
+          folders you selected under Save notes to.
         </p>
         <div className="mt-3 flex flex-col gap-3">
-          <button
-            type="button"
-            disabled={ingestDisabled || busy}
-            className={`min-h-[44px] w-full rounded-lg px-3 font-medium disabled:opacity-40 ${
-              isRecording
-                ? "border-2 border-red-500/80 bg-transparent text-red-400"
-                : "bg-[var(--accent)] text-[var(--bg)]"
-            }`}
-            onClick={toggleRecording}
-          >
-            {isRecording ? "Stop recording" : "Start recording"}
-          </button>
+          {isRecording ? (
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                className="min-h-[44px] w-full rounded-lg border-2 border-red-500/80 bg-transparent px-3 font-medium text-red-400 disabled:opacity-40"
+                onClick={stopRecording}
+              >
+                Stop recording and save
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                className="min-h-[44px] w-full rounded-lg border border-[var(--border)] px-3 font-medium disabled:opacity-40"
+                onClick={cancelRecording}
+              >
+                Cancel recording
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={ingestDisabled || busy}
+              className="min-h-[44px] w-full rounded-lg bg-[var(--accent)] px-3 font-medium text-[var(--bg)] disabled:opacity-40"
+              onClick={() => void startRecording()}
+            >
+              Start recording
+            </button>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -396,16 +913,73 @@ export default function HomeClient() {
         </div>
       </section>
 
+      {signedIn ? (
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="flex min-h-[44px] flex-wrap items-center gap-2">
+            <h2 className="font-medium">Stored audio</h2>
+            <button
+              type="button"
+              className="ml-auto text-sm text-[var(--accent)]"
+              onClick={() => void loadStoredAudio()}
+            >
+              Refresh
+            </button>
+          </div>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Voice uploads and recordings are kept on disk until you delete them
+            here. Transcripts and notes are unchanged.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {storedAudio === null ? (
+              <li className="text-sm text-[var(--muted)]">Loading…</li>
+            ) : storedAudio.length === 0 ? (
+              <li className="text-sm text-[var(--muted)]">No audio files on disk.</li>
+            ) : (
+              storedAudio.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex min-h-[44px] flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-sm">{row.filename}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {new Date(row.createdAt).toLocaleString()} · {row.status}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!!deletingId}
+                    className="shrink-0 rounded-lg border border-red-500/60 px-3 py-1.5 text-sm text-red-400 disabled:opacity-40"
+                    onClick={() => void deleteStoredAudio(row)}
+                  >
+                    {deletingId === row.id ? "Deleting…" : "Delete"}
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+      ) : null}
+
       {status ? (
         <p className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
           {status}
         </p>
       ) : null}
 
-      <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-        <div className="flex min-h-[44px] flex-wrap items-center gap-2">
+      <details className="group rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-2 [&::-webkit-details-marker]:hidden">
+          <span
+            className="inline-block shrink-0 text-[var(--muted)] transition-transform duration-200 group-open:rotate-90"
+            aria-hidden
+          >
+            ▶
+          </span>
           <h2 className="font-medium">Library</h2>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div
+            className="ml-auto flex flex-wrap items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               type="button"
               title="Add top-level library"
@@ -423,11 +997,11 @@ export default function HomeClient() {
               Refresh
             </button>
           </div>
-        </div>
+        </summary>
         <p className="mt-2 text-xs text-[var(--muted)]">
-          Use + next to a folder to add a subgroup. Capture chooses existing
-          folders automatically; create folders here first if you want specific
-          placements.
+          Use + next to a folder to add a subgroup. When you ingest, pick
+          destinations in the Save notes to section on this page—create the folders you need
+          here first.
         </p>
         <div className="mt-3">
           {!signedIn ? (
@@ -443,41 +1017,6 @@ export default function HomeClient() {
               onAddChild={(id) => void createFolder(id)}
             />
           )}
-        </div>
-      </section>
-
-      <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-        <summary className="cursor-pointer font-medium">
-          Library formats &amp; JSON shape
-        </summary>
-        <div className="mt-4 space-y-4 text-sm">
-          <p className="text-[var(--muted)]">
-            Guides use your actual folder names (Blog, Company, Ideas, Inbox).
-            Subgroups are yours to create with + before ingest can target them.
-          </p>
-          <ul className="space-y-4">
-            {ROOT_LIBRARY_GUIDES.map((g) => (
-              <li key={g.folderName}>
-                <p className="font-medium">{g.label}</p>
-                <p className="mt-1 text-[var(--muted)]">{g.purpose}</p>
-                <p className="mt-2 font-mono text-xs text-[var(--text)]">
-                  {g.examplePathsMarkdown}
-                </p>
-              </li>
-            ))}
-          </ul>
-          <div>
-            <p className="font-medium">Extraction payload</p>
-            <p className="mt-2 whitespace-pre-wrap text-[var(--muted)]">
-              {EXTRACTION_PAYLOAD_OVERVIEW}
-            </p>
-          </div>
-          <div>
-            <p className="font-medium">OpenAI JSON Schema</p>
-            <pre className="mt-2 max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text)]">
-              {extractionJsonSchemaFormatted()}
-            </pre>
-          </div>
         </div>
       </details>
     </div>

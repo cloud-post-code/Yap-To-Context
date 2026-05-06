@@ -1,27 +1,66 @@
 import path from "path";
 import fs from "fs";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { assertAuthorized } from "@/lib/auth";
 import { getAudioStoragePath } from "@/lib/env";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
-import { buildFolderPathManifest, loadAllFolders } from "@/lib/folder-paths";
 import { extractStructuredNotes, transcribeAudioFile } from "@/lib/openai-extract";
 import { processExtractions } from "@/lib/process-ingest";
 
 export const runtime = "nodejs";
+
+const uuidSchema = z.string().uuid();
+
+function parseFolderIds(form: FormData): { ok: true; ids: string[] } | { ok: false; error: string } {
+  const raw = form.getAll("folderIds");
+  const ids: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const t = v.trim();
+    if (!t) continue;
+    const parsed = uuidSchema.safeParse(t);
+    if (!parsed.success) {
+      return { ok: false, error: "Invalid folderIds (expected UUIDs)" };
+    }
+    ids.push(parsed.data);
+  }
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) {
+    return { ok: false, error: "Select at least one destination folder" };
+  }
+  return { ok: true, ids: unique };
+}
 
 export async function POST(req: NextRequest) {
   const denied = await assertAuthorized(req);
   if (denied) return denied;
 
   const form = await req.formData();
+  const folderParse = parseFolderIds(form);
+  if (!folderParse.ok) {
+    return Response.json({ error: folderParse.error }, { status: 400 });
+  }
+  const targetFolderIds = folderParse.ids;
+
   const audio = form.get("audio");
   const textField = form.get("text");
 
   const db = getDb();
+
+  const existingFolders = await db
+    .select({ id: schema.folders.id })
+    .from(schema.folders)
+    .where(inArray(schema.folders.id, targetFolderIds));
+  if (existingFolders.length !== targetFolderIds.length) {
+    return Response.json(
+      { error: "One or more selected folders do not exist" },
+      { status: 400 },
+    );
+  }
   const transcriptId = uuidv4();
 
   try {
@@ -79,10 +118,8 @@ export async function POST(req: NextRequest) {
       createdAt: new Date(),
     });
 
-    const manifest = buildFolderPathManifest(await loadAllFolders());
     const payload = await extractStructuredNotes({
       transcript: transcriptText,
-      folderManifest: manifest,
     });
 
     await db
@@ -93,7 +130,7 @@ export async function POST(req: NextRequest) {
       })
       .where(eq(schema.ingestJobs.id, jobId));
 
-    await processExtractions({ transcriptId, payload });
+    await processExtractions({ transcriptId, payload, targetFolderIds });
 
     await db
       .update(schema.transcripts)

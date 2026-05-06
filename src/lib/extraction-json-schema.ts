@@ -13,16 +13,9 @@ export const extractionJsonSchema = {
           properties: {
             title: { type: "string" },
             body: { type: "string" },
-            folder_paths: {
-              type: "array",
-              items: {
-                type: "array",
-                items: { type: "string" },
-              },
-            },
             reasoning_brief: { type: "string" },
           },
-          required: ["title", "body", "folder_paths", "reasoning_brief"],
+          required: ["title", "body", "reasoning_brief"],
         },
       },
     },

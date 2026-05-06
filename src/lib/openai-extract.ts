@@ -8,7 +8,6 @@ const extractionSchema = z.object({
     z.object({
       title: z.string(),
       body: z.string(),
-      folder_paths: z.array(z.array(z.string())),
       reasoning_brief: z.string(),
     }),
   ),
@@ -33,13 +32,8 @@ export async function transcribeAudioFile(input: {
 
 export async function extractStructuredNotes(input: {
   transcript: string;
-  folderManifest: string;
 }): Promise<ExtractionPayload> {
   const openai = new OpenAI({ apiKey: getOpenAiApiKey() });
-  const manifest =
-    input.folderManifest.trim().length > 0
-      ? input.folderManifest
-      : "(no folders yet)";
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -47,21 +41,19 @@ export async function extractStructuredNotes(input: {
     messages: [
       {
         role: "system",
-        content: `You fully automate organizing the transcript: decide how many notes to create, write each note, and choose library folders — no questions to the user.
+        content: `You turn the transcript into one or more notes: titles, bodies, and brief rationales for how you split them. The user chooses library folders elsewhere — do not assign folders or paths.
+
+Fidelity (non-negotiable): The transcript is the only source of substantive content in title and body. Do not invent or add information the speaker did not say (or type): no new facts, names, numbers, dates, commitments, causes, or details. Do not "helpfully" fill gaps, extrapolate unstated specifics, or treat guesses as facts. Allowed: summarize, split across notes, reorder for clarity, rephrase in your own words, and use markdown (headings, bullets) — still strictly grounded in what appears in the transcript. If the transcript is vague or incomplete, the notes must stay vague or incomplete on that point rather than fabricating precision.
 
 Splitting: Use multiple extractions when the transcript clearly covers separate topics, tasks, or decisions; use a single extraction for one coherent note.
-Placement: For each extraction, pick the best matching path(s) from the manifest using meaning (not keywords only). You choose — the user does not.
 
 Rules:
-- You MUST NOT invent folders. Every segment in every folder_paths entry must exist in the manifest (match case-insensitively, trim whitespace). Paths are root-to-leaf exactly as listed.
 - Each extraction is one document (title + body). Body: short, readable markdown; bullets when helpful.
-- folder_paths: array of paths; each path is segment names from root to leaf. Multiple paths only when the same note truly belongs in more than one place.
-- If nothing fits, use folder_paths [["Inbox"]] only.
-- reasoning_brief: required; one short line (≤120 chars) on split/placement choices, or "" if obvious.`,
+- reasoning_brief: required; one short line (≤120 chars) on split/summary choices only, or "" if obvious. It must not introduce factual claims absent from the transcript.`,
       },
       {
         role: "user",
-        content: `Existing folder paths (one per line):\n${manifest}\n\nTranscript:\n${input.transcript}`,
+        content: input.transcript,
       },
     ],
     response_format: { type: "json_schema", json_schema: extractionJsonSchema },
