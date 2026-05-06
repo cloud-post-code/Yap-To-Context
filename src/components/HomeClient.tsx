@@ -273,13 +273,13 @@ export default function HomeClient() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Yap to Context</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          On Railway (production), the service must have{" "}
-          <code className="text-[var(--accent)]">OPENAI_API_KEY</code>,{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> (app password),
-          and <code className="text-[var(--accent)]">AUTH_SECRET</code> in Variables —
-          the app will not start without them. Locally you can use Settings instead.
+          On Railway, set <code className="text-[var(--accent)]">OPENAI_API_KEY</code>,{" "}
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code> (app password), and{" "}
+          <code className="text-[var(--accent)]">AUTH_SECRET</code> as service variables, or
+          add keys under Settings. If <code className="text-[var(--accent)]">INGEST_API_KEY</code>{" "}
+          is in Variables, <code className="text-[var(--accent)]">AUTH_SECRET</code> must be too.
           Sign in with the app password (same as{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> on the host) to
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code> when set on the host) to
           capture notes and manage folders.
         </p>
       </header>
@@ -300,15 +300,14 @@ export default function HomeClient() {
 
       {needsSetup ? (
         <p className="rounded-xl border border-amber-600/50 bg-amber-950/40 px-4 py-3 text-sm">
-          Finish setup: on Railway add{" "}
-          <code className="text-[var(--accent)]">OPENAI_API_KEY</code> and{" "}
-          <code className="text-[var(--accent)]">INGEST_API_KEY</code> to Variables
-          (and <code className="text-[var(--accent)]">AUTH_SECRET</code> with ingest),
-          or locally open{" "}
+          Finish setup: open{" "}
           <Link href="/settings" className="text-[var(--accent)]">
             Settings
           </Link>{" "}
-          and save keys there.
+          and save your OpenAI key, plus an app password if the host did not set{" "}
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code>. On Railway, if you set{" "}
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code> in Variables, add{" "}
+          <code className="text-[var(--accent)]">AUTH_SECRET</code> there too.
         </p>
       ) : null}
 

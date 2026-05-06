@@ -1,7 +1,7 @@
 # https://docs.railway.com/guides/config-as-code
 # Add a PostgreSQL service and link it so DATABASE_URL is injected on this service.
 # Migrations run on boot via src/instrumentation.ts (idempotent). Local CLI: npm run db:migrate
-# Required Variables on this service (production boot fails if missing): OPENAI_API_KEY, INGEST_API_KEY, AUTH_SECRET
+# Recommended Variables: OPENAI_API_KEY, INGEST_API_KEY. If INGEST_API_KEY is set, AUTH_SECRET is required (boot fails without it).
 # Mount a volume on `/data` if you use file-based audio storage (AUDIO_STORAGE_PATH defaults to /data/audio in production).
 
 [deploy]
