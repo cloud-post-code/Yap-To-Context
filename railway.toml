@@ -1,6 +1,6 @@
 # https://docs.railway.com/guides/config-as-code
 # Add a PostgreSQL service and link it so DATABASE_URL is injected on this service.
-# Migrations run on boot via instrumentation.ts (idempotent). Local CLI: npm run db:migrate
+# Migrations run on boot via src/instrumentation.ts (idempotent). Local CLI: npm run db:migrate
 # Mount a volume on `/data` if you use file-based audio storage (AUDIO_STORAGE_PATH defaults to /data/audio in production).
 
 [deploy]
