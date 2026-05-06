@@ -687,40 +687,22 @@ export default function HomeClient() {
       ) : null}
 
       {signedIn && auth?.secretConfigured ? (
-        <>
-          <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-            <h2 className="font-medium">Export database</h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Download all tables as JSON (folders, documents, transcripts,
-              jobs). Audio files on disk are not included—only paths and
-              metadata.
-            </p>
-            <button
-              type="button"
-              disabled={exportDbDisabled}
-              className="mt-3 min-h-[44px] w-full rounded-lg border border-[var(--border)] px-3 text-sm font-medium disabled:opacity-40"
-              onClick={() => void exportDatabase()}
-            >
-              {dbExportBusy ? "Preparing…" : "Download JSON"}
-            </button>
-          </section>
-
-          <section className="rounded-xl border border-red-500/35 bg-[var(--surface)] p-4">
-            <h2 className="font-medium text-red-400/95">Danger zone</h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Remove all library data and audio from the database and disk.
-              Default top-level folders are seeded again afterward.
-            </p>
-            <button
-              type="button"
-              disabled={clearDbDisabled}
-              className="mt-3 min-h-[44px] w-full rounded-lg border border-red-500/60 px-3 text-sm font-medium text-red-400 disabled:opacity-40"
-              onClick={() => void clearDatabase()}
-            >
-              {busy ? "Working…" : "Clear database"}
-            </button>
-          </section>
-        </>
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <h2 className="font-medium">Export database</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Download all tables as JSON (folders, documents, transcripts,
+            jobs). Audio files on disk are not included—only paths and
+            metadata.
+          </p>
+          <button
+            type="button"
+            disabled={exportDbDisabled}
+            className="mt-3 min-h-[44px] w-full rounded-lg border border-[var(--border)] px-3 text-sm font-medium disabled:opacity-40"
+            onClick={() => void exportDatabase()}
+          >
+            {dbExportBusy ? "Preparing…" : "Download JSON"}
+          </button>
+        </section>
       ) : null}
 
       {signedIn && auth?.openAiConfigured ? (
@@ -765,11 +747,6 @@ export default function HomeClient() {
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h2 className="font-medium">Add from text</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          {speechSupported === false
-            ? "Your browser does not support live captions. Paste or type notes below."
-            : "Words appear here as you speak. Stop when finished, then ingest."}
-        </p>
         {speechSupported === false ? (
           <textarea
             className="mt-2 min-h-[120px] w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)]"
@@ -781,16 +758,11 @@ export default function HomeClient() {
           <>
             <div
               className="mt-2 min-h-[120px] w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)] whitespace-pre-wrap"
+              aria-label="Live captions"
               aria-live="polite"
               aria-relevant="additions text"
             >
-              {noteText ? (
-                <span>{noteText}</span>
-              ) : !interimText && !isDictating ? (
-                <span className="text-[var(--muted)]">
-                  Tap “Start listening”, allow the microphone, then speak.
-                </span>
-              ) : null}
+              {noteText ? <span>{noteText}</span> : null}
               {interimText ? (
                 <span className="text-[var(--muted)]">
                   {noteText ? " " : ""}
@@ -849,21 +821,10 @@ export default function HomeClient() {
         >
           Ingest text
         </button>
-        {speechSupported !== false ? (
-          <p className="mt-2 text-xs text-[var(--muted)]">
-            Stop listening before ingest so the last phrase is finalized. In
-            Chrome or Edge, captions run on your device.
-          </p>
-        ) : null}
       </section>
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h2 className="font-medium">Voice</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Start recording, then stop to save or cancel to discard without
-          ingesting. Saved clips are transcribed and split into notes using the
-          folders you selected under Save notes to.
-        </p>
         <div className="mt-3 flex flex-col gap-3">
           {isRecording ? (
             <div className="flex flex-col gap-2">
@@ -1019,6 +980,24 @@ export default function HomeClient() {
           )}
         </div>
       </details>
+
+      {signedIn && auth?.secretConfigured ? (
+        <section className="rounded-xl border border-red-500/35 bg-[var(--surface)] p-4">
+          <h2 className="font-medium text-red-400/95">Danger zone</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Remove all library data and audio from the database and disk.
+            Default top-level folders are seeded again afterward.
+          </p>
+          <button
+            type="button"
+            disabled={clearDbDisabled}
+            className="mt-3 min-h-[44px] w-full rounded-lg border border-red-500/60 px-3 text-sm font-medium text-red-400 disabled:opacity-40"
+            onClick={() => void clearDatabase()}
+          >
+            {busy ? "Working…" : "Clear database"}
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }
