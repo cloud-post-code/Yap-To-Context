@@ -1,7 +1,11 @@
 # https://docs.railway.com/guides/config-as-code
-# Mount a volume on `/data` so SQLite (`/data/app.db`) and audio survive restarts.
+# Add a PostgreSQL service and link it to this service so DATABASE_URL is set.
+# Migrations run before the new deployment goes live; the app also runs migrations
+# on boot via instrumentation (idempotent).
+# Mount a volume on `/data` if you use file-based audio storage (AUDIO_STORAGE_PATH defaults to /data/audio in production).
 
 [deploy]
 healthcheckPath = "/api/settings"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
+preDeployCommand = ["npm", "run", "db:migrate"]

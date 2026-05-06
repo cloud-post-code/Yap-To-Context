@@ -11,3 +11,4 @@ data/*.db-wal
 storage/audio/*
 !storage/audio/.gitkeep
 npm-debug.log*
+tsconfig.tsbuildinfo

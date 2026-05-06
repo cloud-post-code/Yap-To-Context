@@ -7,7 +7,7 @@ export type FolderRow = {
   name: string;
 };
 
-export function loadAllFolders(): FolderRow[] {
+export async function loadAllFolders(): Promise<FolderRow[]> {
   const db = getDb();
   return db
     .select({
@@ -15,8 +15,7 @@ export function loadAllFolders(): FolderRow[] {
       parentId: schema.folders.parentId,
       name: schema.folders.name,
     })
-    .from(schema.folders)
-    .all();
+    .from(schema.folders);
 }
 
 export function buildFolderPathManifest(rows: FolderRow[]): string {

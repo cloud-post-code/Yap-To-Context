@@ -1,19 +1,15 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import type { NextRequest } from "next/server";
-import {
-  getAuthSecret as getAuthSecretFromEnv,
-  productionLikeDeployment,
-} from "@/lib/deploy-env";
+import { getAuthSecret as getAuthSecretFromEnv } from "@/lib/deploy-env";
 import { getEffectiveIngestApiKey } from "@/lib/settings";
 
 export const SESSION_COOKIE = "yap_ingest_session";
 const MAX_AGE_SEC = 60 * 60 * 24 * 7;
 
-function getAuthSecret(): string | null {
-  const s = getAuthSecretFromEnv()?.trim();
-  if (s) return s;
-  if (productionLikeDeployment()) return null;
-  return "development-auth-secret";
+/** Prefer AUTH_SECRET when set; otherwise the ingest password is the signing secret too. */
+function resolveSigningSecret(ingestKey: string): string {
+  const env = getAuthSecretFromEnv()?.trim();
+  return env || ingestKey;
 }
 
 function sign(payloadB64: string, ingestKey: string, secret: string) {
@@ -22,16 +18,16 @@ function sign(payloadB64: string, ingestKey: string, secret: string) {
     .digest("hex");
 }
 
-export function createSessionCookieValue(): string | null {
-  const secret = getAuthSecret();
-  if (!secret) return null;
-
+export async function createSessionCookieValue(): Promise<string | null> {
   let ingestKey: string;
   try {
-    ingestKey = getEffectiveIngestApiKey();
+    ingestKey = await getEffectiveIngestApiKey();
   } catch {
     return null;
   }
+
+  const secret = resolveSigningSecret(ingestKey);
+  if (!secret) return null;
 
   const exp = Date.now() + MAX_AGE_SEC * 1000;
   const payloadB64 = Buffer.from(JSON.stringify({ exp }), "utf8").toString(
@@ -41,16 +37,16 @@ export function createSessionCookieValue(): string | null {
   return `${payloadB64}.${sig}`;
 }
 
-export function verifySessionCookie(req: NextRequest): boolean {
-  const secret = getAuthSecret();
-  if (!secret) return false;
-
+export async function verifySessionCookie(req: NextRequest): Promise<boolean> {
   let ingestKey: string;
   try {
-    ingestKey = getEffectiveIngestApiKey();
+    ingestKey = await getEffectiveIngestApiKey();
   } catch {
     return false;
   }
+
+  const secret = resolveSigningSecret(ingestKey);
+  if (!secret) return false;
 
   const raw = req.cookies.get(SESSION_COOKIE)?.value;
   if (!raw) return false;
@@ -118,6 +114,12 @@ export function buildSessionClearCookie(): string {
   return parts.join("; ");
 }
 
-export function cookieSessionsAvailable(): boolean {
-  return !!getAuthSecret();
+/** True once an ingest password exists (cookies use it or AUTH_SECRET for signing). */
+export async function cookieSessionsSupported(): Promise<boolean> {
+  try {
+    await getEffectiveIngestApiKey();
+    return true;
+  } catch {
+    return false;
+  }
 }

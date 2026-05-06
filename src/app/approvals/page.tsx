@@ -72,7 +72,8 @@ export default function ApprovalsPage() {
       </Link>
       <h1 className="mt-4 text-xl font-semibold">Pending folders</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Approve to create folders and finish routing linked notes.
+        New ingests no longer queue folders here; approve legacy rows only,
+        or reject them.
       </p>
 
       <section className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">

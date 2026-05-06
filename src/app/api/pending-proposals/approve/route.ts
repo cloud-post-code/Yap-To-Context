@@ -10,7 +10,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const denied = assertIngestAuthorized(req);
+  const denied = await assertIngestAuthorized(req);
   if (denied) return denied;
 
   const json = await req.json().catch(() => null);
@@ -19,6 +19,6 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  approveFolderProposals(parsed.data.ids);
+  await approveFolderProposals(parsed.data.ids);
   return Response.json({ ok: true });
 }

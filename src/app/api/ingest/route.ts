@@ -14,7 +14,7 @@ import { processExtractions } from "@/lib/process-ingest";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const denied = assertIngestAuthorized(req);
+  const denied = await assertIngestAuthorized(req);
   if (denied) return denied;
 
   const form = await req.formData();
@@ -38,34 +38,30 @@ export async function POST(req: NextRequest) {
       fs.writeFileSync(abs, buf);
       const audioRelpath = path.relative(process.cwd(), abs);
 
-      db.insert(schema.transcripts)
-        .values({
-          id: transcriptId,
-          audioRelpath,
-          text: null,
-          status: "pending",
-          createdAt: new Date(),
-        })
-        .run();
+      await db.insert(schema.transcripts).values({
+        id: transcriptId,
+        audioRelpath,
+        text: null,
+        status: "pending",
+        createdAt: new Date(),
+      });
 
       transcriptText = await transcribeAudioFile({ buffer: buf, filename: orig });
 
-      db.update(schema.transcripts)
+      await db
+        .update(schema.transcripts)
         .set({ text: transcriptText, status: "transcribed" })
-        .where(eq(schema.transcripts.id, transcriptId))
-        .run();
+        .where(eq(schema.transcripts.id, transcriptId));
     } else if (typeof textField === "string" && textField.trim().length > 0) {
       transcriptText = textField.trim();
 
-      db.insert(schema.transcripts)
-        .values({
-          id: transcriptId,
-          audioRelpath: "",
-          text: transcriptText,
-          status: "transcribed",
-          createdAt: new Date(),
-        })
-        .run();
+      await db.insert(schema.transcripts).values({
+        id: transcriptId,
+        audioRelpath: "",
+        text: transcriptText,
+        status: "transcribed",
+        createdAt: new Date(),
+      });
     } else {
       return Response.json(
         { error: "Provide multipart field `audio` (file) or `text` (string)." },
@@ -74,37 +70,35 @@ export async function POST(req: NextRequest) {
     }
 
     const jobId = uuidv4();
-    db.insert(schema.ingestJobs)
-      .values({
-        id: jobId,
-        transcriptId,
-        model: "gpt-4o-mini",
-        rawLlmJson: null,
-        status: "processing",
-        createdAt: new Date(),
-      })
-      .run();
+    await db.insert(schema.ingestJobs).values({
+      id: jobId,
+      transcriptId,
+      model: "gpt-4o-mini",
+      rawLlmJson: null,
+      status: "processing",
+      createdAt: new Date(),
+    });
 
-    const manifest = buildFolderPathManifest(loadAllFolders());
+    const manifest = buildFolderPathManifest(await loadAllFolders());
     const payload = await extractStructuredNotes({
       transcript: transcriptText,
       folderManifest: manifest,
     });
 
-    db.update(schema.ingestJobs)
+    await db
+      .update(schema.ingestJobs)
       .set({
         rawLlmJson: JSON.stringify(payload),
         status: "completed",
       })
-      .where(eq(schema.ingestJobs.id, jobId))
-      .run();
+      .where(eq(schema.ingestJobs.id, jobId));
 
-    processExtractions({ transcriptId, payload });
+    await processExtractions({ transcriptId, payload });
 
-    db.update(schema.transcripts)
+    await db
+      .update(schema.transcripts)
       .set({ status: "processed" })
-      .where(eq(schema.transcripts.id, transcriptId))
-      .run();
+      .where(eq(schema.transcripts.id, transcriptId));
 
     return Response.json({
       transcriptId,
@@ -113,10 +107,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     try {
-      db.update(schema.transcripts)
+      await db
+        .update(schema.transcripts)
         .set({ status: "error" })
-        .where(eq(schema.transcripts.id, transcriptId))
-        .run();
+        .where(eq(schema.transcripts.id, transcriptId));
     } catch {
       /* row may not exist */
     }

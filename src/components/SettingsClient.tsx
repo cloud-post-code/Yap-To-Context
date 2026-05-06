@@ -119,7 +119,7 @@ export default function SettingsClient() {
       </Link>
       <h1 className="mt-4 text-2xl font-semibold">API keys</h1>
       <p className="mt-2 text-sm text-[var(--muted)]">
-        Keys are stored in the app database (SQLite). Environment variables
+        Keys are stored in the app database (PostgreSQL). Environment variables
         override stored values when set on the host (for example Railway).
       </p>
 
@@ -127,7 +127,10 @@ export default function SettingsClient() {
         <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
           <li>OpenAI (effective): {st.openAiConfigured ? "yes" : "no"}</li>
           <li>Ingest (effective): {st.ingestConfigured ? "yes" : "no"}</li>
-          <li>Cookie sign-in: {st.cookieSessionsAvailable ? "enabled" : "needs AUTH_SECRET"}</li>
+          <li>
+            Cookie sign-in:{" "}
+            {st.cookieSessionsAvailable ? "enabled" : "needs an app password"}
+          </li>
           {st.envOverrides.openai ? (
             <li className="text-amber-300">
               OPENAI_API_KEY is set in the environment — it overrides the stored key.
@@ -162,7 +165,7 @@ export default function SettingsClient() {
 
         <div>
           <label className="text-sm font-medium" htmlFor="ing">
-            Ingest API key
+            App password (ingest key)
           </label>
           <input
             id="ing"

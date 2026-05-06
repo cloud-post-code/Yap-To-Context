@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
   let expected: string;
   try {
-    expected = getEffectiveIngestApiKey();
+    expected = await getEffectiveIngestApiKey();
   } catch {
     return Response.json(
       { error: "Ingest API key is not configured yet." },
@@ -46,12 +46,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const val = createSessionCookieValue();
+  const val = await createSessionCookieValue();
   if (!val) {
     return Response.json(
       {
         error:
-          "Cookie sign-in is unavailable. Set AUTH_SECRET on the server (recommended on Railway), or call APIs with the Bearer / X-Api-Key header.",
+          "Could not create a session. Ensure an ingest password is configured (INGEST_API_KEY on the host or Settings).",
       },
       { status: 503 },
     );

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { assertIngestAuthorized } from "@/lib/ingest-auth";
-import { cookieSessionsAvailable } from "@/lib/ingest-session";
+import { cookieSessionsSupported } from "@/lib/ingest-session";
 import {
   deleteSetting,
   hasIngestKey,
@@ -17,13 +17,13 @@ export const runtime = "nodejs";
 
 export async function GET() {
   return Response.json({
-    openAiConfigured: hasOpenAiKey(),
-    ingestConfigured: hasIngestKey(),
+    openAiConfigured: await hasOpenAiKey(),
+    ingestConfigured: await hasIngestKey(),
     envOverrides: {
       openai: !!openAiFromEnv(),
       ingest: !!ingestFromEnv(),
     },
-    cookieSessionsAvailable: cookieSessionsAvailable(),
+    cookieSessionsAvailable: await cookieSessionsSupported(),
   });
 }
 
@@ -43,8 +43,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  if (hasIngestKey()) {
-    const denied = assertIngestAuthorized(req);
+  if (await hasIngestKey()) {
+    const denied = await assertIngestAuthorized(req);
     if (denied) return denied;
   }
 
@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
       /* skip — env wins */
     } else {
       const v = openAiKey.trim();
-      if (v) setSetting(SETTING_OPENAI, v);
-      else deleteSetting(SETTING_OPENAI);
+      if (v) await setSetting(SETTING_OPENAI, v);
+      else await deleteSetting(SETTING_OPENAI);
     }
   }
 
@@ -65,8 +65,8 @@ export async function POST(req: NextRequest) {
       /* skip — env wins */
     } else {
       const v = ingestKey.trim();
-      if (v) setSetting(SETTING_INGEST, v);
-      else deleteSetting(SETTING_INGEST);
+      if (v) await setSetting(SETTING_INGEST, v);
+      else await deleteSetting(SETTING_INGEST);
     }
   }
 

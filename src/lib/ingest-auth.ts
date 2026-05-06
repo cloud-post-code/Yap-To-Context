@@ -14,7 +14,9 @@ function timingSafeStringEq(a: string, b: string): boolean {
   }
 }
 
-export function assertIngestAuthorized(req: NextRequest): Response | null {
+export async function assertIngestAuthorized(
+  req: NextRequest,
+): Promise<Response | null> {
   let token =
     req.headers.get("x-api-key")?.trim() ||
     (req.headers.get("authorization")?.startsWith("Bearer ")
@@ -23,13 +25,13 @@ export function assertIngestAuthorized(req: NextRequest): Response | null {
 
   let key: string;
   try {
-    key = getEffectiveIngestApiKey();
+    key = await getEffectiveIngestApiKey();
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Not configured";
     return Response.json({ error: msg }, { status: 500 });
   }
 
-  if (verifySessionCookie(req)) {
+  if (await verifySessionCookie(req)) {
     return null;
   }
 

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import {
-  cookieSessionsAvailable,
+  cookieSessionsSupported,
   verifySessionCookie,
 } from "@/lib/ingest-session";
 import {
@@ -14,10 +14,10 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   return Response.json({
-    authenticated: verifySessionCookie(req),
-    openAiConfigured: hasOpenAiKey(),
-    ingestConfigured: hasIngestKey(),
-    cookieSessionsAvailable: cookieSessionsAvailable(),
+    authenticated: await verifySessionCookie(req),
+    openAiConfigured: await hasOpenAiKey(),
+    ingestConfigured: await hasIngestKey(),
+    cookieSessionsAvailable: await cookieSessionsSupported(),
     envOverrides: {
       openai: !!openAiFromEnv(),
       ingest: !!ingestFromEnv(),

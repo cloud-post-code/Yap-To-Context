@@ -31,41 +31,39 @@ function safeBasename(title: string, id: string) {
 export async function zipFolderSubtree(folderId: string): Promise<Buffer> {
   const db = getDb();
 
-  const folderExists = db
+  const folderExists = await db
     .select({ id: schema.folders.id })
     .from(schema.folders)
     .where(eq(schema.folders.id, folderId))
-    .get();
-  if (!folderExists) {
+    .limit(1);
+  if (folderExists.length === 0) {
     throw new Error("NOT_FOUND");
   }
 
-  const folderRows = db
+  const folderRows = await db
     .select({ id: schema.folders.id, parentId: schema.folders.parentId })
-    .from(schema.folders)
-    .all();
+    .from(schema.folders);
 
   const scope = descendantFolderIds(folderId, folderRows);
 
-  const docLinksScoped = db
+  const allLinks = await db
     .select({
       documentId: schema.documentFolders.documentId,
       folderId: schema.documentFolders.folderId,
     })
-    .from(schema.documentFolders)
-    .all()
-    .filter((r) => scope.has(r.folderId));
+    .from(schema.documentFolders);
+
+  const docLinksScoped = allLinks.filter((r) => scope.has(r.folderId));
 
   const docIds = [...new Set(docLinksScoped.map((r) => r.documentId))];
 
   const docs =
     docIds.length === 0
       ? []
-      : db
+      : await db
           .select()
           .from(schema.documents)
-          .where(inArray(schema.documents.id, docIds))
-          .all();
+          .where(inArray(schema.documents.id, docIds));
 
   const archive = archiver("zip", { zlib: { level: 9 } });
   const chunks: Buffer[] = [];

@@ -1,26 +1,55 @@
 import {
-  sqliteTable,
+  foreignKey,
+  pgTable,
   text,
-  integer,
+  timestamp,
   primaryKey,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
 
-export const folders = sqliteTable("folders", {
+export const folders = pgTable(
+  "folders",
+  {
+    id: text("id").primaryKey(),
+    parentId: text("parent_id"),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+  },
+  (table) => ({
+    parentFk: foreignKey({
+      columns: [table.parentId],
+      foreignColumns: [table.id],
+    }),
+  }),
+);
+
+export const transcripts = pgTable("transcripts", {
   id: text("id").primaryKey(),
-  parentId: text("parent_id"),
-  name: text("name").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  audioRelpath: text("audio_relpath").notNull(),
+  text: text("text"),
+  status: text("status").notNull(),
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
 });
 
-export const documents = sqliteTable("documents", {
+export const documents = pgTable("documents", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   body: text("body").notNull(),
-  sourceTranscriptId: text("source_transcript_id"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  sourceTranscriptId: text("source_transcript_id").references(
+    () => transcripts.id,
+  ),
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
 });
 
-export const documentFolders = sqliteTable(
+export const documentFolders = pgTable(
   "document_folders",
   {
     documentId: text("document_id")
@@ -35,15 +64,7 @@ export const documentFolders = sqliteTable(
   }),
 );
 
-export const transcripts = sqliteTable("transcripts", {
-  id: text("id").primaryKey(),
-  audioRelpath: text("audio_relpath").notNull(),
-  text: text("text"),
-  status: text("status").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
-
-export const ingestJobs = sqliteTable("ingest_jobs", {
+export const ingestJobs = pgTable("ingest_jobs", {
   id: text("id").primaryKey(),
   transcriptId: text("transcript_id")
     .notNull()
@@ -51,10 +72,13 @@ export const ingestJobs = sqliteTable("ingest_jobs", {
   model: text("model").notNull(),
   rawLlmJson: text("raw_llm_json"),
   status: text("status").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
 });
 
-export const folderProposals = sqliteTable("folder_proposals", {
+export const folderProposals = pgTable("folder_proposals", {
   id: text("id").primaryKey(),
   transcriptId: text("transcript_id")
     .notNull()
@@ -63,10 +87,13 @@ export const folderProposals = sqliteTable("folder_proposals", {
   parentFolderId: text("parent_folder_id").references(() => folders.id),
   segmentsJson: text("segments_json").notNull(),
   status: text("status").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
 });
 
-export const pendingDocumentPlacements = sqliteTable(
+export const pendingDocumentPlacements = pgTable(
   "pending_document_placements",
   {
     id: text("id").primaryKey(),
@@ -76,11 +103,14 @@ export const pendingDocumentPlacements = sqliteTable(
     proposalId: text("proposal_id")
       .notNull()
       .references(() => folderProposals.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
   },
 );
 
-export const appSettings = sqliteTable("app_settings", {
+export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });

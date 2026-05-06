@@ -9,23 +9,21 @@ export type FolderTreeNode = {
   children: FolderTreeNode[];
 };
 
-export function buildFolderTree(): FolderTreeNode[] {
+export async function buildFolderTree(): Promise<FolderTreeNode[]> {
   const db = getDb();
 
-  const folders = db
+  const folders = await db
     .select({
       id: schema.folders.id,
       parentId: schema.folders.parentId,
       name: schema.folders.name,
     })
-    .from(schema.folders)
-    .all();
+    .from(schema.folders);
 
   const directCounts = new Map<string, number>();
-  const junctionRows = db
+  const junctionRows = await db
     .select({ folderId: schema.documentFolders.folderId })
-    .from(schema.documentFolders)
-    .all();
+    .from(schema.documentFolders);
   for (const row of junctionRows) {
     directCounts.set(row.folderId, (directCounts.get(row.folderId) ?? 0) + 1);
   }

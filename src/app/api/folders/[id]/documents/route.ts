@@ -11,7 +11,7 @@ export async function GET(
   const { id: folderId } = await ctx.params;
   const db = getDb();
 
-  const rows = db
+  const rows = await db
     .select({
       id: schema.documents.id,
       title: schema.documents.title,
@@ -22,8 +22,7 @@ export async function GET(
       schema.documentFolders,
       eq(schema.documentFolders.documentId, schema.documents.id),
     )
-    .where(eq(schema.documentFolders.folderId, folderId))
-    .all();
+    .where(eq(schema.documentFolders.folderId, folderId));
 
   rows.sort(
     (a, b) =>

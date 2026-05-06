@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3", "archiver"],
+  serverExternalPackages: ["postgres", "archiver"],
 };
 
 export default nextConfig;

@@ -10,7 +10,7 @@ export function productionLikeDeployment(): boolean {
   );
 }
 
-/** Required for signed ingest cookies on production-like hosts (recommended on Railway). */
+/** Optional extra entropy for cookie signatures; when unset, the ingest password is used. */
 export function getAuthSecret(): string | undefined {
   const v = process.env.AUTH_SECRET?.trim();
   return v || undefined;

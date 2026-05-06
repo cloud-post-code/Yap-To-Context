@@ -2,6 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  EXTRACTION_PAYLOAD_OVERVIEW,
+  ROOT_LIBRARY_GUIDES,
+  extractionJsonSchemaFormatted,
+} from "@/lib/library-schema-copy";
 import type { FolderTreeNode } from "@/lib/tree-build";
 
 type AuthStatus = {
@@ -15,9 +20,15 @@ type AuthStatus = {
 function TreeList({
   nodes,
   depth,
+  folderActionsDisabled,
+  busy,
+  onAddChild,
 }: {
   nodes: FolderTreeNode[];
   depth: number;
+  folderActionsDisabled: boolean;
+  busy: boolean;
+  onAddChild: (parentId: string) => void;
 }) {
   if (nodes.length === 0) return null;
   return (
@@ -26,14 +37,36 @@ function TreeList({
     >
       {nodes.map((n) => (
         <li key={n.id}>
-          <Link
-            href={`/folder/${n.id}`}
-            className="flex min-h-[44px] items-center justify-between rounded-lg px-2 py-2 hover:bg-[var(--surface)]"
-          >
-            <span>{n.name}</span>
-            <span className="text-sm text-[var(--muted)]">{n.docCount}</span>
-          </Link>
-          <TreeList nodes={n.children} depth={depth + 1} />
+          <div className="flex min-h-[44px] items-center gap-1 rounded-lg px-2 py-2 hover:bg-[var(--surface)]">
+            <Link
+              href={`/folder/${n.id}`}
+              className="flex min-w-0 flex-1 items-center justify-between py-1"
+            >
+              <span className="truncate">{n.name}</span>
+              <span className="ml-2 shrink-0 text-sm text-[var(--muted)]">
+                {n.docCount}
+              </span>
+            </Link>
+            <button
+              type="button"
+              title="Add subgroup"
+              disabled={folderActionsDisabled || busy}
+              className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-lg leading-none text-[var(--accent)] disabled:opacity-40"
+              onClick={(e) => {
+                e.preventDefault();
+                onAddChild(n.id);
+              }}
+            >
+              +
+            </button>
+          </div>
+          <TreeList
+            nodes={n.children}
+            depth={depth + 1}
+            folderActionsDisabled={folderActionsDisabled}
+            busy={busy}
+            onAddChild={onAddChild}
+          />
         </li>
       ))}
     </ul>
@@ -43,11 +76,11 @@ function TreeList({
 export default function HomeClient() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [signInKey, setSignInKey] = useState("");
-  const [bearer, setBearer] = useState("");
   const [tree, setTree] = useState<FolderTreeNode[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -72,15 +105,6 @@ export default function HomeClient() {
     void loadTree();
   }, [loadTree]);
 
-  const ingestHeaders = (): HeadersInit => {
-    const h: HeadersInit = {};
-    const t = bearer.trim();
-    if (t) {
-      h.Authorization = `Bearer ${t}`;
-    }
-    return h;
-  };
-
   const ingestForm = async (form: FormData) => {
     setBusy(true);
     setStatus(null);
@@ -88,7 +112,6 @@ export default function HomeClient() {
       const res = await fetch("/api/ingest", {
         method: "POST",
         credentials: "include",
-        headers: ingestHeaders(),
         body: form,
       });
       const body = await res.json().catch(() => ({}));
@@ -122,31 +145,49 @@ export default function HomeClient() {
   };
 
   const stopRecording = () => {
-    mediaRef.current?.stop();
+    const rec = mediaRef.current;
+    if (!rec) return;
+    setIsRecording(false);
+    setBusy(true);
+    setStatus("Transcribing and organizing…");
+    rec.stop();
     mediaRef.current = null;
   };
 
   const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const rec = new MediaRecorder(stream);
-    chunksRef.current = [];
-    rec.ondataavailable = (ev) => {
-      if (ev.data.size) chunksRef.current.push(ev.data);
-    };
-    rec.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunksRef.current, { type: rec.mimeType });
-      const fd = new FormData();
-      fd.set(
-        "audio",
-        blob,
-        `recording.${blob.type.includes("webm") ? "webm" : "ogg"}`,
+    if (mediaRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (ev) => {
+        if (ev.data.size) chunksRef.current.push(ev.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType });
+        const fd = new FormData();
+        fd.set(
+          "audio",
+          blob,
+          `recording.${blob.type.includes("webm") ? "webm" : "ogg"}`,
+        );
+        await ingestForm(fd);
+      };
+      rec.start();
+      mediaRef.current = rec;
+      setIsRecording(true);
+      setStatus("Recording… tap again to stop and save.");
+    } catch (e) {
+      setStatus(
+        e instanceof Error ? e.message : "Could not access microphone",
       );
-      await ingestForm(fd);
-    };
-    rec.start();
-    mediaRef.current = rec;
-    setStatus("Recording… tap Stop when done.");
+    }
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) stopRecording();
+    else void startRecording();
   };
 
   const signIn = async () => {
@@ -179,41 +220,69 @@ export default function HomeClient() {
 
   const needsSetup =
     auth && (!auth.openAiConfigured || !auth.ingestConfigured);
-  const needsBearerFallback =
-    auth &&
-    auth.ingestConfigured &&
-    !auth.cookieSessionsAvailable &&
-    !auth.authenticated;
-
   const cookieModeBlocked =
     !!auth &&
     auth.ingestConfigured &&
     !auth.authenticated &&
     auth.cookieSessionsAvailable;
 
-  const bearerModeBlocked =
-    !!auth &&
-    auth.ingestConfigured &&
-    !auth.cookieSessionsAvailable &&
-    !auth.authenticated &&
-    !bearer.trim();
+  const ingestDisabled = !!needsSetup || cookieModeBlocked;
 
-  const ingestDisabled =
-    !!needsSetup || cookieModeBlocked || bearerModeBlocked;
+  const createFolder = useCallback(
+    async (parentId: string | null) => {
+      if (ingestDisabled) {
+        setStatus("Sign in or paste Bearer ingest key to add folders.");
+        return;
+      }
+      const label =
+        parentId === null ? "Library name (top-level folder)" : "Subgroup name";
+      const raw = window.prompt(label);
+      if (raw === null) return;
+      const name = raw.trim();
+      if (!name) return;
+
+      setBusy(true);
+      setStatus(null);
+      try {
+        const res = await fetch("/api/folders", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId, name }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || res.statusText);
+        await loadTree();
+        setStatus(
+          parentId === null
+            ? `Added library “${name}”.`
+            : `Added subgroup “${name}”.`,
+        );
+      } catch (e) {
+        setStatus(e instanceof Error ? e.message : "Could not create folder");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [ingestDisabled, loadTree],
+  );
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Yap to Context</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Configure API keys in Settings (stored in the database). Sign in here
-          to ingest and approve folders from this browser.
+          Add your OpenAI key under Settings if it is not already set on the
+          server. Sign in with the app password (same secret as{" "}
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code> on the
+          host, or the ingest key saved in Settings) to capture notes and manage
+          folders.
         </p>
       </header>
 
       <nav className="flex flex-wrap gap-4 text-sm">
         <Link href="/settings">Settings (API keys)</Link>
-        <Link href="/approvals">Pending folder approvals</Link>
+        <Link href="/approvals">Pending folder approvals (legacy)</Link>
       </nav>
 
       {needsSetup ? (
@@ -222,7 +291,8 @@ export default function HomeClient() {
           <Link href="/settings" className="text-[var(--accent)]">
             Settings
           </Link>{" "}
-          and save your OpenAI and ingest keys.
+          and save your OpenAI key, plus an app password if the host did not set{" "}
+          <code className="text-[var(--accent)]">INGEST_API_KEY</code>.
         </p>
       ) : null}
 
@@ -233,13 +303,13 @@ export default function HomeClient() {
         <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <h2 className="font-medium">Sign in</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Enter the ingest API key from Settings (stored in the app).
+            Enter the app password (not your OpenAI key).
           </p>
           <input
             type="password"
             autoComplete="off"
             className="mt-3 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3"
-            placeholder="Ingest API key"
+            placeholder="App password"
             value={signInKey}
             onChange={(e) => setSignInKey(e.target.value)}
           />
@@ -264,26 +334,6 @@ export default function HomeClient() {
         </button>
       ) : null}
 
-      {needsBearerFallback ? (
-        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <h2 className="font-medium">Bearer header</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Cookie sign-in needs{" "}
-            <code className="text-[var(--accent)]">AUTH_SECRET</code> on the
-            server (set it on Railway). Until then, paste your ingest key for
-            each request from this device.
-          </p>
-          <input
-            type="password"
-            autoComplete="off"
-            className="mt-3 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3"
-            placeholder="Ingest API key (Bearer)"
-            value={bearer}
-            onChange={(e) => setBearer(e.target.value)}
-          />
-        </section>
-      ) : null}
-
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h2 className="font-medium">Add from text</h2>
         <textarea
@@ -303,36 +353,40 @@ export default function HomeClient() {
       </section>
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-        <h2 className="font-medium">Audio</h2>
-        <div className="mt-3 flex flex-col gap-2">
+        <h2 className="font-medium">Voice</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          One tap to record, tap again to finish. The model transcribes, splits
+          into notes, and places them under the folders that fit best.
+        </p>
+        <div className="mt-3 flex flex-col gap-3">
           <button
             type="button"
-            disabled={busy || ingestDisabled}
-            className="min-h-[44px] rounded-lg bg-[var(--accent)] px-3 font-medium text-[var(--bg)] disabled:opacity-40"
-            onClick={() => void startRecording()}
+            disabled={ingestDisabled || busy}
+            className={`min-h-[44px] w-full rounded-lg px-3 font-medium disabled:opacity-40 ${
+              isRecording
+                ? "border-2 border-red-500/80 bg-transparent text-red-400"
+                : "bg-[var(--accent)] text-[var(--bg)]"
+            }`}
+            onClick={toggleRecording}
           >
-            Start recording
+            {isRecording ? "Stop recording" : "Start recording"}
           </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            disabled={ingestDisabled || busy}
+            onChange={() => void onPickFile()}
+          />
           <button
             type="button"
-            disabled={busy || ingestDisabled}
-            className="min-h-[44px] rounded-lg border border-[var(--border)] px-3 font-medium disabled:opacity-40"
-            onClick={stopRecording}
+            disabled={ingestDisabled || busy}
+            className="text-center text-sm text-[var(--muted)] underline decoration-[var(--border)] underline-offset-2 disabled:opacity-40"
+            onClick={() => fileRef.current?.click()}
           >
-            Stop & upload
+            Upload an audio file instead
           </button>
-          <label className="flex min-h-[44px] cursor-pointer items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-sm">
-            Upload file
-            <input
-              ref={fileRef}
-              type="file"
-              accept="audio/*"
-              capture="environment"
-              className="hidden"
-              disabled={ingestDisabled}
-              onChange={() => void onPickFile()}
-            />
-          </label>
         </div>
       </section>
 
@@ -343,24 +397,81 @@ export default function HomeClient() {
       ) : null}
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-        <div className="flex min-h-[44px] items-center justify-between">
+        <div className="flex min-h-[44px] flex-wrap items-center gap-2">
           <h2 className="font-medium">Library</h2>
-          <button
-            type="button"
-            className="text-sm text-[var(--accent)]"
-            onClick={() => void loadTree()}
-          >
-            Refresh
-          </button>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              title="Add top-level library"
+              disabled={ingestDisabled || busy}
+              className="flex size-9 items-center justify-center rounded-lg border border-[var(--border)] text-lg leading-none text-[var(--accent)] disabled:opacity-40"
+              onClick={() => void createFolder(null)}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className="text-sm text-[var(--accent)]"
+              onClick={() => void loadTree()}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          Use + next to a folder to add a subgroup. Capture chooses existing
+          folders automatically; create folders here first if you want specific
+          placements.
+        </p>
         <div className="mt-3">
           {tree ? (
-            <TreeList nodes={tree} depth={0} />
+            <TreeList
+              nodes={tree}
+              depth={0}
+              folderActionsDisabled={ingestDisabled}
+              busy={busy}
+              onAddChild={(id) => void createFolder(id)}
+            />
           ) : (
             <p className="text-[var(--muted)]">Loading…</p>
           )}
         </div>
       </section>
+
+      <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <summary className="cursor-pointer font-medium">
+          Library formats &amp; JSON shape
+        </summary>
+        <div className="mt-4 space-y-4 text-sm">
+          <p className="text-[var(--muted)]">
+            Guides use your actual folder names (Blog, Company, Ideas, Inbox).
+            Subgroups are yours to create with + before ingest can target them.
+          </p>
+          <ul className="space-y-4">
+            {ROOT_LIBRARY_GUIDES.map((g) => (
+              <li key={g.folderName}>
+                <p className="font-medium">{g.label}</p>
+                <p className="mt-1 text-[var(--muted)]">{g.purpose}</p>
+                <p className="mt-2 font-mono text-xs text-[var(--text)]">
+                  {g.examplePathsMarkdown}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <div>
+            <p className="font-medium">Extraction payload</p>
+            <p className="mt-2 whitespace-pre-wrap text-[var(--muted)]">
+              {EXTRACTION_PAYLOAD_OVERVIEW}
+            </p>
+          </div>
+          <div>
+            <p className="font-medium">OpenAI JSON Schema</p>
+            <pre className="mt-2 max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text)]">
+              {extractionJsonSchemaFormatted()}
+            </pre>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

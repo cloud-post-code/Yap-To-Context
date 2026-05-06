@@ -11,17 +11,18 @@ export async function GET(
   const { id } = await ctx.params;
   const db = getDb();
 
-  const doc = db
+  const docRows = await db
     .select()
     .from(schema.documents)
     .where(eq(schema.documents.id, id))
-    .get();
+    .limit(1);
+  const doc = docRows[0];
 
   if (!doc) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  const folders = db
+  const folders = await db
     .select({
       id: schema.folders.id,
       name: schema.folders.name,
@@ -31,8 +32,7 @@ export async function GET(
       schema.documentFolders,
       eq(schema.documentFolders.folderId, schema.folders.id),
     )
-    .where(eq(schema.documentFolders.documentId, id))
-    .all();
+    .where(eq(schema.documentFolders.documentId, id));
 
   return Response.json({ document: doc, folders });
 }
